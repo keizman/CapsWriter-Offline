@@ -1,25 +1,74 @@
 import onnxruntime
 import time
 import os
+import math
 import numpy as np
 from . import logger
 
 """
-ONNX 推理底层工具 - DirectML (DML) 性能优化指南
+ONNX 推理底层工具 - 可配置 Padding 策略
 
-为什么使用固定 30s 的 padding_secs？
-
-1. 规避重新编译开销：DirectML 会为第一次输入的形状编译 GPU 算子图。根据 ORT 源码，
-   Shape 的任何变动都会触发 recompileNeeded，产生约 200ms+ 的编译开销（即“入场券”成本）。
-
-2. 实现全量复用：将短音频补长到 30s，DML 仅需在加载时的“预热”阶段编译一次。后续推理
-   将直接命中编译缓存，编码计算仅需约 60ms。对于超过 30S 的音频，200ms 的算子编译开销就可忽略不计了。
-
-3. 配合 input lens 逻辑：通过补零锁定 Shape 解决 recompile 开销，同时利用 ilens 
-   提供物理长度信息，在输出端进对结果进行精确裁切，确保 100% 的识别精度。
+padding_mode:
+- auto: DML -> fixed30；CoreML/CPU -> fixed5
+- fixed30: 始终至少补齐到 30 秒
+- fixed5: 始终至少补齐到 5 秒
+- dynamic: 5 秒起步，30 秒内按 5 秒分桶补齐；超过 30 秒按实际长度
 """
 
-def load_onnx_models(encoder_path, ctc_path, padding_secs=30, dml_enable=True):
+
+def _normalize_padding_mode(padding_mode: str) -> str:
+    mode = str(padding_mode or "auto").strip().lower()
+    aliases = {
+        "legacy": "fixed30",
+        "30": "fixed30",
+        "fixed_30": "fixed30",
+        "fixed-30": "fixed30",
+        "5": "fixed5",
+        "fixed_5": "fixed5",
+        "fixed-5": "fixed5",
+    }
+    return aliases.get(mode, mode)
+
+
+def _resolve_padding_mode(provider: str, padding_mode: str) -> str:
+    mode = _normalize_padding_mode(padding_mode)
+    if mode != "auto":
+        return mode
+    if provider == "DmlExecutionProvider":
+        return "fixed30"
+    if provider == "CoreMLExecutionProvider":
+        return "fixed5"
+    return "fixed5"
+
+
+def _resolve_padding_secs(actual_samples: int, provider: str, padding_mode: str, padding_secs: int) -> int:
+    mode = _resolve_padding_mode(provider, padding_mode)
+    base_secs = max(1, int(padding_secs))
+
+    if mode == "fixed30":
+        return max(30, base_secs)
+    if mode == "fixed5":
+        return 5
+    if mode == "dynamic":
+        actual_secs = max(actual_samples / 16000.0, 0.0)
+        if actual_secs <= 5:
+            return 5
+        if actual_secs <= 30:
+            return int(math.ceil(actual_secs / 5.0) * 5)
+        return int(math.ceil(actual_secs))
+
+    logger.warning(f"未知 padding_mode={padding_mode}，回退 fixed5")
+    return 5
+
+
+def load_onnx_models(
+    encoder_path,
+    ctc_path,
+    padding_secs=30,
+    dml_enable=True,
+    coreml_enable=False,
+    padding_mode="auto",
+):
     """步骤 1: 加载 ONNX 音频编码器和 CTC Head 并进行热身"""
     # print("\n[1] 加载 ONNX Models (Encoder + CTC)...")
     
@@ -32,6 +81,8 @@ def load_onnx_models(encoder_path, ctc_path, padding_secs=30, dml_enable=True):
     providers = ['CPUExecutionProvider']
     if dml_enable and 'DmlExecutionProvider' in onnxruntime.get_available_providers():
         providers.insert(0, 'DmlExecutionProvider') 
+    if coreml_enable and 'CoreMLExecutionProvider' in onnxruntime.get_available_providers():
+        providers.insert(0, 'CoreMLExecutionProvider')
     logger.info(f"Onnxruntime providers: {providers}")
     
     encoder_sess = onnxruntime.InferenceSession(
@@ -45,12 +96,25 @@ def load_onnx_models(encoder_path, ctc_path, padding_secs=30, dml_enable=True):
         sess_options=session_opts, 
         providers=providers
     )
+
+    encoder_provider = encoder_sess.get_providers()[0] if encoder_sess.get_providers() else "CPUExecutionProvider"
+    warmup_padding_secs = _resolve_padding_secs(
+        actual_samples=0,
+        provider=encoder_provider,
+        padding_mode=padding_mode,
+        padding_secs=padding_secs,
+    )
+    resolved_mode = _resolve_padding_mode(encoder_provider, padding_mode)
+    logger.info(
+        f"ONNX padding 策略: mode={padding_mode} -> {resolved_mode}, "
+        f"provider={encoder_provider}, warmup={warmup_padding_secs}s"
+    )
     
     # Warmup
-    if padding_secs > 0:
+    if warmup_padding_secs > 0:
         # print(f"   [Warmup] Warming up with {warmup_secs}s pseudo-audio...")
         SR = 16000
-        warmup_samples = int(SR * padding_secs)  # Ensure int
+        warmup_samples = int(SR * warmup_padding_secs)  # Ensure int
         
         # Encoder Warmup
         audio_type = encoder_sess.get_inputs()[0].type
@@ -77,7 +141,8 @@ def load_onnx_models(encoder_path, ctc_path, padding_secs=30, dml_enable=True):
     t_cost = time.perf_counter() - t_start
     return encoder_sess, ctc_sess, t_cost
 
-def encode_audio(audio, encoder_sess, padding_secs=30):
+
+def encode_audio(audio, encoder_sess, padding_secs=30, padding_mode="auto"):
     """使用 ONNX Encoder 获取 LLM 嵌入和 CTC 特征，支持自动 Padding"""
     
     # Check expected input type
@@ -85,17 +150,18 @@ def encode_audio(audio, encoder_sess, padding_secs=30):
     audio_type = encoder_sess.get_inputs()[0].type
     dtype = np.float16 if 'float16' in audio_type else np.float32
 
-    # Padding logic
     actual_samples = len(audio)
-    
-    # [Optimize] 检测 Provider，如果是 CPU，按最低限度 Padding (因为 CPU 不存在 DML 的重编译开销)
-    if encoder_sess.get_providers()[0] == 'CPUExecutionProvider':
-        padding_secs = 5
-        
-    target_samples = int(padding_secs * 16000)
+
+    encoder_provider = encoder_sess.get_providers()[0] if encoder_sess.get_providers() else "CPUExecutionProvider"
+    target_padding_secs = _resolve_padding_secs(
+        actual_samples=actual_samples,
+        provider=encoder_provider,
+        padding_mode=padding_mode,
+        padding_secs=padding_secs,
+    )
+    target_samples = int(target_padding_secs * 16000)
     
     if actual_samples < target_samples:
-        # print(f"   [Padding] {actual_samples/16000:.2f}s -> {padding_secs}s")
         padded_audio = np.zeros(target_samples, dtype=audio.dtype)
         padded_audio[:actual_samples] = audio
         audio = padded_audio

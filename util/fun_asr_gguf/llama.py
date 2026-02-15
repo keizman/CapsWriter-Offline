@@ -149,6 +149,39 @@ llama_sampler_init_top_p = None
 llama_sampler_sample = None
 llama_sampler_free = None
 
+
+def _resolve_llama_lib_dir() -> Path:
+    """
+    解析 llama 动态库目录。
+
+    优先级：
+    1) .app 与项目同级时，优先使用项目目录下的 util/fun_asr_gguf/bin
+    2) 当前工作目录下的 util/fun_asr_gguf/bin
+    3) 模块目录下的 bin（源码/已打包内置路径）
+    """
+    module_bin = Path(__file__).resolve().parent / "bin"
+    candidates: list[Path] = []
+
+    # frozen 场景下，尝试从 .app 外层目录定位项目路径
+    if getattr(sys, "frozen", False):
+        exe_path = Path(sys.executable)
+        for parent in [exe_path, *exe_path.parents]:
+            if parent.suffix == ".app":
+                app_parent = parent.parent
+                candidates.append(app_parent / "util" / "fun_asr_gguf" / "bin")
+                break
+
+    # 命令行从项目根启动时，cwd 通常可直接定位到 util/bin
+    candidates.append(Path.cwd() / "util" / "fun_asr_gguf" / "bin")
+    candidates.append(module_bin)
+
+    for candidate in candidates:
+        if candidate.is_dir():
+            return candidate
+
+    return module_bin
+
+
 def init_llama_lib():
     """初始化 llama.cpp 库，支持跨平台加载"""
     global llama, ggml, ggml_base
@@ -168,8 +201,8 @@ def init_llama_lib():
     if llama is not None:
         return
 
-    # 获取库文件所在目录 (模块目录下的 bin)
-    lib_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin")
+    # 获取库文件所在目录（支持 .app 同级项目目录）
+    lib_dir = _resolve_llama_lib_dir().as_posix()
 
     # DLL 命名处理
     if sys.platform == "win32":
@@ -362,7 +395,7 @@ def load_model(model_path: str):
         model: llama_model 指针
     """
     # 明确路径
-    lib_dir = Path(__file__).parent / 'bin'
+    lib_dir = _resolve_llama_lib_dir()
     model_path = Path(model_path)
     model_rel = Path(relpath(model_path, lib_dir))
 

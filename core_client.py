@@ -28,8 +28,47 @@ from util.logger import setup_logger
 from util.common.lifecycle import lifecycle
 from util.client.cleanup import cleanup_client_resources, request_exit_from_tray
 
+
+def _debug_base_resolution(message: str) -> None:
+    if os.getenv("CAPSWRITER_DEBUG_BASE_DIR", "0") == "1":
+        print(f"[base_dir][client] {message}", flush=True)
+
+
 # 确保根目录位置正确，用相对路径加载模型
-BASE_DIR = os.path.dirname(__file__)
+def _resolve_base_dir() -> str:
+    """解析运行基目录，兼容 macOS .app 与源码运行。"""
+    if not getattr(sys, "frozen", False):
+        _debug_base_resolution(f"non-frozen base={os.path.dirname(__file__)}")
+        return os.path.dirname(__file__)
+
+    raw_exe_path = Path(sys.executable)
+    exe_path = raw_exe_path.resolve()
+    _debug_base_resolution(f"sys.executable={raw_exe_path.as_posix()} resolved={exe_path.as_posix()}")
+    # macOS .app：从任意 .app 内部路径反推到 .app 外层目录
+    # 兼容 sys.executable 位于 Contents/MacOS 或 Contents/Frameworks 的情况
+    for parent in [raw_exe_path, *raw_exe_path.parents, exe_path, *exe_path.parents]:
+        if parent.suffix == ".app":
+            app_parent = parent.parent
+            # 客户端放在项目根目录时，这些文件通常与 .app 同级
+            _debug_base_resolution(
+                f"found_bundle={parent.as_posix()} app_parent={app_parent.as_posix()} "
+                f"config_exists={(app_parent / 'config_client.py').exists()} "
+                f"assets_exists={(app_parent / 'assets').exists()}"
+            )
+            if (app_parent / "config_client.py").exists() or (app_parent / "assets").exists():
+                return app_parent.as_posix()
+            # 找到 .app 但同级没有目标文件时，继续尝试其它候选路径
+
+    cwd = Path.cwd()
+    if (cwd / "config_client.py").exists() or (cwd / "assets").exists():
+        _debug_base_resolution(f"use_cwd={cwd.as_posix()}")
+        return cwd.as_posix()
+
+    _debug_base_resolution(f"fallback={exe_path.parent.as_posix()}")
+    return exe_path.parent.as_posix()
+
+
+BASE_DIR = _resolve_base_dir()
 os.chdir(BASE_DIR)
 
 # 确保终端能使用 ANSI 控制字符
@@ -48,12 +87,14 @@ _main_task = None  # 主任务引用
 def _check_macos_permissions() -> None:
     """检查 MacOS 权限设置"""
     if system() == 'Darwin' and not sys.argv[1:]:
-        if os.getuid() != 0:
-            print('在 MacOS 上需要以管理员启动客户端才能监听键盘活动，请 sudo 启动')
-            input('按回车退出')
-            sys.exit(1)
+        # macOS 不需要 sudo；关键是系统权限授权（辅助功能、输入监控、麦克风）
+        if os.getuid() == 0:
+            logger.warning("检测到以 root 启动。macOS 客户端通常不需要 sudo。")
         else:
-            os.umask(0o000)
+            logger.info(
+                "macOS 使用提示：请在“系统设置 -> 隐私与安全性”中授予本程序 "
+                "“辅助功能 / 输入监控 / 麦克风”权限。"
+            )
 
 
 async def main_mic() -> None:
@@ -118,6 +159,9 @@ async def main_mic() -> None:
                     logger.error(f"处理循环异常: {e}")
                     # 防止死循环打印日志
                     await asyncio.sleep(1)
+                else:
+                    # 处理循环提前返回（例如连接失败）时，短暂等待避免空转
+                    await asyncio.sleep(0.5)
 
     except asyncio.CancelledError:
         logger.info("主任务被取消，正在退出...")

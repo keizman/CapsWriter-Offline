@@ -28,6 +28,10 @@ class FunASREngine:
         similar_threshold: float = 0.6,
         max_hotwords: int = 10,
         dml_enable: bool = True,
+        coreml_enable: bool = False,
+        metal_enable: bool = True,
+        onnx_padding_mode: str = "auto",
+        onnx_padding_secs: int = 30,
         vulkan_enable: bool = True,
         vulkan_force_fp32: bool = False,
     ):
@@ -44,6 +48,10 @@ class FunASREngine:
             similar_threshold=similar_threshold,
             max_hotwords=max_hotwords,
             dml_enable=dml_enable,
+            coreml_enable=coreml_enable,
+            metal_enable=metal_enable,
+            onnx_padding_mode=onnx_padding_mode,
+            onnx_padding_secs=onnx_padding_secs,
             vulkan_enable=vulkan_enable,
             vulkan_force_fp32=vulkan_force_fp32
         )
@@ -127,6 +135,10 @@ def create_asr_engine(
     similar_threshold: float = 0.6,
     max_hotwords: int = 10,
     dml_enable: bool = True,
+    coreml_enable: bool = False,
+    metal_enable: bool = True,
+    onnx_padding_mode: str = "auto",
+    onnx_padding_secs: int = 30,
     vulkan_enable: bool = True,
     vulkan_force_fp32: bool = False,
     verbose: bool = True,
@@ -144,10 +156,13 @@ def create_asr_engine(
         similar_threshold=similar_threshold,
         max_hotwords=max_hotwords,
         dml_enable=dml_enable,
+        coreml_enable=coreml_enable,
+        metal_enable=metal_enable,
+        onnx_padding_mode=onnx_padding_mode,
+        onnx_padding_secs=onnx_padding_secs,
         vulkan_enable=vulkan_enable,
         vulkan_force_fp32=vulkan_force_fp32,
     )
     if not engine.initialize(verbose=verbose):
         raise RuntimeError("Failed to initialize ASR engine")
     return engine
-

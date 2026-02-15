@@ -12,12 +12,16 @@ import platform
 from typing import Optional
 import re
 
-import keyboard
 import pyclip
 from pynput import keyboard as pynput_keyboard
 
 from config_client import ClientConfig as Config
 from . import logger
+
+if platform.system() == 'Windows':
+    import keyboard as keyboard_lib
+else:
+    keyboard_lib = None
 
 
 
@@ -114,4 +118,10 @@ class TextOutput:
             text: 要输出的文本
         """
         logger.debug(f"使用打字方式输出文本，长度: {len(text)}")
-        keyboard.write(text)
+        if keyboard_lib is not None:
+            keyboard_lib.write(text)
+            return
+
+        # 非 Windows 场景回退到 pynput
+        controller = pynput_keyboard.Controller()
+        controller.type(text)

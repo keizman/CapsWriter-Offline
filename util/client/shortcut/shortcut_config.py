@@ -68,24 +68,39 @@ class Shortcut:
         Returns:
             str: 规范化后的键名（pynput 格式）
         """
-        # 转小写
-        key = key.lower().strip()
+        # 转小写并统一加号形式（兼容全角 +）
+        key = key.lower().strip().replace('＋', '+')
 
-        # 替换常见别名
+        # 单个空格按键
+        if key == ' ':
+            return 'space'
+
+        # 组合键：如 "ctrl + command" -> "ctrl+cmd"
+        if '+' in key:
+            parts = [p.strip() for p in key.split('+') if p.strip()]
+            normalized_parts = [Shortcut._normalize_single_key(part) for part in parts]
+            return '+'.join(normalized_parts)
+
+        return Shortcut._normalize_single_key(key)
+
+    @staticmethod
+    def _normalize_single_key(key: str) -> str:
+        """规范化单个按键名称。"""
         aliases = {
             'capslock': 'caps_lock',
             'caps lock': 'caps_lock',
-            ' ': 'space',
             'control': 'ctrl',
+            'command': 'cmd',
+            'right command': 'cmd_r',
+            'left command': 'cmd',
+            'right ctrl': 'ctrl_r',
+            'left ctrl': 'ctrl',
+            'right shift': 'shift_r',
+            'left shift': 'shift',
+            'right alt': 'alt_r',
+            'left alt': 'alt',
         }
-
-        for old, new in aliases.items():
-            key = key.replace(old, new)
-
-        # 移除左右修饰符标记（pynput 会自动处理）
-        # 保留 'left ctrl' 这样的形式
-
-        return key
+        return aliases.get(key, key)
 
     def is_toggle_key(self) -> bool:
         """

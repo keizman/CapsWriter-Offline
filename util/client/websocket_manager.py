@@ -8,6 +8,7 @@ WebSocket 连接管理模块
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import TYPE_CHECKING, Optional
 
@@ -34,16 +35,18 @@ class WebSocketManager:
         max_retries: 最大重试次数
     """
     
-    def __init__(self, state: 'ClientState', max_retries: int = 3):
+    def __init__(self, state: 'ClientState', max_retries: int = 3, retry_delay: float = 1.0):
         """
         初始化 WebSocket 管理器
         
         Args:
             state: 客户端状态实例
             max_retries: 连接失败时的最大重试次数
+            retry_delay: 每次重试前的等待秒数
         """
         self.state = state
         self.max_retries = max_retries
+        self.retry_delay = retry_delay
     
     @property
     def is_connected(self) -> bool:
@@ -67,7 +70,7 @@ class WebSocketManager:
         if self.state.websocket is not None:
             self.state.websocket = None
         
-        url = f"ws://{Config.addr}:{Config.port}"
+        url = Config.websocket_url()
         
         for attempt in range(1, self.max_retries + 1):
             try:
@@ -88,6 +91,9 @@ class WebSocketManager:
                 logger.warning(f"连接超时 (尝试 {attempt}/{self.max_retries})")
             except Exception as e:
                 logger.error(f"连接失败: {e} (尝试 {attempt}/{self.max_retries})")
+
+            if attempt < self.max_retries:
+                await asyncio.sleep(self.retry_delay)
         
         logger.error(f"无法连接到服务端 {url}，已重试 {self.max_retries} 次")
         return False

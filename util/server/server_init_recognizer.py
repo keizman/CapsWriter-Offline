@@ -10,7 +10,6 @@ from config_server import ParaformerArgs, ModelPaths, SenseVoiceArgs, FunASRNano
 from util.server.server_check_model import check_model
 from util.server.server_cosmic import console
 from util.server.server_recognize import recognize
-from util.fun_asr_gguf import create_asr_engine
 
 from . import logger
 
@@ -84,17 +83,35 @@ def init_recognizer(queue_in: Queue, queue_out: Queue, sockets_id, stdin_fn):
     try:
         if model_type == 'fun_asr_nano':
             logger.debug("使用 Fun-ASR-Nano 模型")
+            from util.fun_asr_gguf import create_asr_engine
             # recognizer = sherpa_onnx.OfflineRecognizer.from_funasr_nano(
             #     **{key: value for key, value in FunASRNanoArgs.__dict__.items() if not key.startswith('_')}
             # )
             recognizer = create_asr_engine(
-                **{key: value for key, value in FunASRNanoGGUFArgs.__dict__.items() if not key.startswith('_')}
+                **{
+                    key: value
+                    for key, value in FunASRNanoGGUFArgs.__dict__.items()
+                    if not key.startswith('_') and key not in {'device_mode'}
+                }
             )
         elif model_type == 'sensevoice':
             logger.debug("使用 SenseVoice 模型")
-            recognizer = sherpa_onnx.OfflineRecognizer.from_sense_voice(
-                **{key: value for key, value in SenseVoiceArgs.__dict__.items() if not key.startswith('_')}
-            )
+            sensevoice_args = {
+                key: value
+                for key, value in SenseVoiceArgs.__dict__.items()
+                if not key.startswith('_') and key not in {'device_mode'}
+            }
+            logger.info(f"SenseVoice provider: {sensevoice_args.get('provider', 'cpu')}")
+            try:
+                recognizer = sherpa_onnx.OfflineRecognizer.from_sense_voice(**sensevoice_args)
+            except Exception as e:
+                provider = sensevoice_args.get("provider", "cpu")
+                if provider != "cpu":
+                    logger.warning(f"SenseVoice provider={provider} 初始化失败，回退 CPU: {e}")
+                    sensevoice_args["provider"] = "cpu"
+                    recognizer = sherpa_onnx.OfflineRecognizer.from_sense_voice(**sensevoice_args)
+                else:
+                    raise
         elif model_type == 'paraformer':
             logger.debug("使用 Paraformer 模型")
             recognizer = sherpa_onnx.OfflineRecognizer.from_paraformer(

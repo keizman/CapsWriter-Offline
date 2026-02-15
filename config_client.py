@@ -1,40 +1,155 @@
 import os
+import sys
+import json
+import platform
 from collections.abc import Iterable
 from pathlib import Path
 
 # 版本信息
 __version__ = '2.4'
 
+_IS_WINDOWS = platform.system() == 'Windows'
+
+
+def _resolve_base_dir() -> str:
+    """解析运行基目录，兼容 macOS .app 与源码运行。"""
+    if not getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(__file__))
+
+    exe_path = Path(sys.executable)
+
+    # 优先尝试 .app 同级目录（把 .app 放在项目根目录时可命中）
+    for parent in [exe_path, *exe_path.parents]:
+        if parent.suffix == ".app":
+            app_parent = parent.parent
+            if (
+                (app_parent / "config_client.py").exists()
+                or (app_parent / "assets").exists()
+                or (app_parent / "LLM").exists()
+            ):
+                return app_parent.as_posix()
+            break
+
+    # 其次尝试当前工作目录
+    cwd = Path.cwd()
+    if (cwd / "config_client.py").exists() or (cwd / "assets").exists() or (cwd / "LLM").exists():
+        return cwd.as_posix()
+
+    # 兜底：可执行文件目录
+    return exe_path.parent.as_posix()
+
+
 # 项目根目录
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = _resolve_base_dir()
+
+
+def _load_local_overrides() -> dict:
+    """
+    读取客户端本地覆盖配置（可选）。
+
+    默认文件名：config_client.local.json
+    可通过 CAPSWRITER_CLIENT_CONFIG 指定路径。
+    """
+    path = os.getenv("CAPSWRITER_CLIENT_CONFIG", "config_client.local.json")
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+    return {}
+
+
+_OVERRIDES = _load_local_overrides()
+
+
+def _get_override(*keys, default=None):
+    current = _OVERRIDES
+    for key in keys:
+        if not isinstance(current, dict) or key not in current:
+            return default
+        current = current[key]
+    return current
+
+
+def _cfg(env_name: str, *keys, default=None):
+    value = os.getenv(env_name)
+    if value is not None:
+        return value
+    return _get_override(*keys, default=default)
 
 
 # 客户端配置
 class ClientConfig:
-    addr = '127.0.0.1'          # Server 地址
-    port = '6016'               # Server 端口
+    addr = str(_cfg("CAPSWRITER_CLIENT_ADDR", "server", "addr", default='127.0.0.1'))   # Server 地址
+    port = str(_cfg("CAPSWRITER_CLIENT_PORT", "server", "port", default='6016'))         # Server 端口
+    server_uri = str(_cfg("CAPSWRITER_CLIENT_SERVER_URI", "server", "uri", default='')).strip()
+
+    @classmethod
+    def websocket_url(cls) -> str:
+        """返回最终 WebSocket 连接地址。"""
+        uri = cls.server_uri
+        if uri:
+            lower = uri.lower()
+            if lower.startswith("ws://") or lower.startswith("wss://"):
+                return uri
+            if lower.startswith("http://"):
+                return "ws://" + uri[len("http://"):]
+            if lower.startswith("https://"):
+                return "wss://" + uri[len("https://"):]
+            return f"ws://{uri}"
+        return f"ws://{cls.addr}:{cls.port}"
+
+    @classmethod
+    def server_display(cls) -> str:
+        """返回用于 UI 显示的服务端地址。"""
+        if cls.server_uri:
+            return cls.server_uri
+        return f"{cls.addr}:{cls.port}"
 
     # 快捷键配置列表
-    shortcuts = [
-        {
-            'key': 'caps_lock',     # 监听大写锁定键
-            'type': 'keyboard',     # 是键盘快捷键
-            'suppress': True,      # 不阻塞按键（但录音结束会补发）
-            'hold_mode': True,      # 长按模式
-            'enabled': True         # 启用此快捷键
-        },
-        {
-            'key': 'x2',
-            'type': 'mouse',
-            'suppress': True,
-            'hold_mode': True,
-            'enabled': True
-        },
-    ]
+    shortcuts = (
+        [
+            {
+                'key': 'caps_lock',     # 监听大写锁定键
+                'type': 'keyboard',     # 是键盘快捷键
+                'suppress': True,       # 阻塞按键（短按会补发）
+                'hold_mode': True,      # 长按模式
+                'enabled': True         # 启用此快捷键
+            },
+            {
+                'key': 'x2',
+                'type': 'mouse',
+                'suppress': True,
+                'hold_mode': True,
+                'enabled': True
+            },
+        ]
+        if _IS_WINDOWS
+        else [
+            {
+                'key': 'ctrl+cmd',      # macOS 默认快捷键：Control + Command
+                'type': 'keyboard',
+                'suppress': False,
+                'hold_mode': True,
+                'enabled': True
+            },
+            {
+                'key': 'caps_lock',     # 保留原始按键支持
+                'type': 'keyboard',
+                'suppress': False,
+                'hold_mode': True,
+                'enabled': True
+            },
+        ]
+    )
 
     threshold    = 0.3          # 快捷键触发阈值（秒）
 
-    paste        = False        # 是否以写入剪切板然后模拟 Ctrl-V 粘贴的方式输出结果
+    paste        = not _IS_WINDOWS  # 非 Windows 默认使用粘贴，兼容性更好
     restore_clip = True         # 模拟粘贴后是否恢复剪贴板
 
     save_audio = True           # 是否保存录音文件
@@ -56,7 +171,7 @@ class ClientConfig:
     llm_enabled = True          # 是否启用 LLM 润色功能，需要配置 LLM/ 目录下的角色文件
     llm_stop_key = 'esc'        # 中断 LLM 输出的快捷键
 
-    enable_tray = True          # 客户端默认启用托盘图标功能
+    enable_tray = _IS_WINDOWS   # 非 Windows 阶段先关闭托盘
 
     # 日志配置
     log_level = 'INFO'          # 日志级别：'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'
@@ -112,7 +227,11 @@ r"""
       ctrl,   ctrl_r,
       shift,  shift_r,
       alt,    alt_r,
-      cmd,    cmd_r
+      cmd,    cmd_r,
+      fn（部分 macOS 设备可能无法被全局监听）
+
+  组合键：
+      ctrl+cmd（示例，支持 `ctrl + command` 这种写法）
 
   特殊键：
       space, enter, tab, backspace, delete, insert, home, end
@@ -128,4 +247,3 @@ r"""
   {'key': 'f12', 'type': 'keyboard', 'suppress': True, 'hold_mode': True, 'enabled': True}, 
   {'key': 'x2', 'type': 'mouse', 'suppress': True, 'hold_mode': True, 'enabled': True}, 
 """
-

@@ -1,4 +1,6 @@
 import os
+import sys
+from pathlib import Path
 from platform import system
 import asyncio
 import websockets
@@ -12,7 +14,48 @@ from util.server.cleanup import setup_tray, print_banner, cleanup_server_resourc
 from util.server.service import start_recognizer_process
 import logging
 
-BASE_DIR = os.path.dirname(__file__); os.chdir(BASE_DIR)
+
+def _debug_base_resolution(message: str) -> None:
+    if os.getenv("CAPSWRITER_DEBUG_BASE_DIR", "0") == "1":
+        print(f"[base_dir][server] {message}", flush=True)
+
+
+def _resolve_base_dir() -> str:
+    """解析运行基目录，兼容 macOS .app 与源码运行。"""
+    # 普通源码运行
+    if not getattr(sys, "frozen", False):
+        _debug_base_resolution(f"non-frozen base={os.path.dirname(__file__)}")
+        return os.path.dirname(__file__)
+
+    # PyInstaller 可执行
+    raw_exe_path = Path(sys.executable)
+    exe_path = raw_exe_path.resolve()
+    _debug_base_resolution(f"sys.executable={raw_exe_path.as_posix()} resolved={exe_path.as_posix()}")
+    # macOS .app：从任意 .app 内部路径反推到 .app 外层目录
+    # 兼容 sys.executable 位于 Contents/MacOS 或 Contents/Frameworks 的情况
+    for parent in [raw_exe_path, *raw_exe_path.parents, exe_path, *exe_path.parents]:
+        if parent.suffix == ".app":
+            app_parent = parent.parent
+            _debug_base_resolution(
+                f"found_bundle={parent.as_posix()} app_parent={app_parent.as_posix()} "
+                f"models_exists={(app_parent / 'models').exists()}"
+            )
+            if (app_parent / "models").exists():
+                return app_parent.as_posix()
+            # 如果找到了 .app 但同级没有 models，继续用其他候选路径尝试
+
+    cwd = Path.cwd()
+    if (cwd / "models").exists():
+        _debug_base_resolution(f"use_cwd={cwd.as_posix()}")
+        return cwd.as_posix()
+
+    # 兜底：可执行文件所在目录
+    _debug_base_resolution(f"fallback={exe_path.parent.as_posix()}")
+    return exe_path.parent.as_posix()
+
+
+BASE_DIR = _resolve_base_dir()
+os.chdir(BASE_DIR)
 
 # 初始化日志系统
 logger = setup_logger('server', level=Config.log_level)

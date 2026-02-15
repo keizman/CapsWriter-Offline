@@ -34,11 +34,43 @@ def set_ui_logger(real_logger):
     logger.set_target(real_logger)
 
 # ============================================================
-# 导出组件
+# 延迟导出（避免 server 场景在导入阶段触发 Tk 依赖）
 # ============================================================
 
-from .toast import toast, toast_stream, ToastMessage, ToastMessageManager
-from .tray import enable_min_to_tray, stop_tray
+def toast(*args: Any, **kwargs: Any):
+    """延迟导入 toast，避免无关场景提前加载 Tk。"""
+    from .toast import toast as _toast
+    return _toast(*args, **kwargs)
+
+
+def toast_stream(*args: Any, **kwargs: Any):
+    """延迟导入 toast_stream，避免无关场景提前加载 Tk。"""
+    from .toast import toast_stream as _toast_stream
+    return _toast_stream(*args, **kwargs)
+
+
+def enable_min_to_tray(*args: Any, **kwargs: Any):
+    """延迟导入托盘模块。"""
+    from .tray import enable_min_to_tray as _enable_min_to_tray
+    return _enable_min_to_tray(*args, **kwargs)
+
+
+def stop_tray(*args: Any, **kwargs: Any):
+    """延迟导入托盘模块。"""
+    from .tray import stop_tray as _stop_tray
+    return _stop_tray(*args, **kwargs)
+
+
+def __getattr__(name: str):
+    """兼容 `from util.ui import ToastMessage` 等懒加载访问。"""
+    if name in ("ToastMessage", "ToastMessageManager"):
+        from .toast import ToastMessage, ToastMessageManager
+        mapping = {
+            "ToastMessage": ToastMessage,
+            "ToastMessageManager": ToastMessageManager,
+        }
+        return mapping[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
     'logger',

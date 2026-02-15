@@ -163,6 +163,10 @@ logs/
 # 运行生成的临时文件 / 二进制
 *.exe
 *.log
+.DS_Store
+*.app/
+build_*/
+dist_*/
 
 
 
@@ -170,6 +174,8 @@ logs/
 .claude
 .vscode
 .agent
+config_server.local.json
+config_client.local.json
 
 LLM/大助理.py
 LLM/高级翻译.py

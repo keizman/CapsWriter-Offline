@@ -162,7 +162,12 @@ class StreamDecoder:
         # 1. Encode
         reporter.print("\n[2] 音频编码...")
         t_s = time.perf_counter()
-        audio_embd, enc_output = encode_audio(stream.audio_data, self.models.encoder_sess)
+        audio_embd, enc_output = encode_audio(
+            stream.audio_data,
+            self.models.encoder_sess,
+            padding_mode=self.models.config.onnx_padding_mode,
+            padding_secs=self.models.config.onnx_padding_secs,
+        )
         timings.encode = time.perf_counter() - t_s
         reporter.print(f"    耗时: {timings.encode*1000:.2f}ms")
 
@@ -283,4 +288,3 @@ class StreamDecoder:
             n_gen=llm_res.n_gen, timings=timings, hotwords=hotwords,
             is_aborted=llm_res.is_aborted
         )
-

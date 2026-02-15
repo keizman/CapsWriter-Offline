@@ -6,7 +6,8 @@ LLM Typing 输出模式
 - paste=False: 实时流式 write，每个字都打出来
 """
 import asyncio
-import keyboard
+import platform
+from pynput import keyboard as pynput_keyboard
 
 from config_client import ClientConfig as Config
 from util.tools.asyncio_to_thread import to_thread
@@ -14,6 +15,24 @@ from util.client.output.text_output import TextOutput
 from util.client.clipboard import paste_text
 from util.llm.llm_stop_monitor import reset, should_stop
 from . import logger
+
+if platform.system() == 'Windows':
+    import keyboard as keyboard_lib
+else:
+    keyboard_lib = None
+
+
+_PYNPUT_CONTROLLER = pynput_keyboard.Controller()
+
+
+def _write_text(text: str) -> None:
+    """跨平台文本输出：Windows 用 keyboard，其他平台用 pynput。"""
+    if not text:
+        return
+    if keyboard_lib is not None:
+        keyboard_lib.write(text)
+    else:
+        _PYNPUT_CONTROLLER.type(text)
 
 
 async def handle_typing_mode(text: str, paste: bool = None, matched_hotwords=None, role_config=None, content=None) -> tuple:
@@ -89,7 +108,7 @@ async def _process_streaming(handler, role_config, content, matched_hotwords) ->
 
         if content_to_write:
             logger.debug(f"output_text: keyboard.write '{content_to_write}'")
-            keyboard.write(content_to_write)
+            _write_text(content_to_write)
             pending_buffer = trailing
         else:
             pending_buffer = trailing
@@ -108,13 +127,13 @@ async def _process_streaming(handler, role_config, content, matched_hotwords) ->
     if not chunks:
         final_text = TextOutput.strip_punc(content)
         logger.debug(f"output_text: keyboard.write '{final_text}' (降级)")
-        keyboard.write(final_text)
+        _write_text(final_text)
         return (final_text, 0, 0.0)
     
     # 如果 LLM 只输出标点，会被拦截，就要做补偿输出
     full_output = ''.join(chunks).strip()
     if len(full_output) == 1 and full_output in Config.trash_punc:
-        keyboard.write(full_output)
+        _write_text(full_output)
     
     return (TextOutput.strip_punc(polished_text), token_count, gen_time)
 
@@ -125,4 +144,4 @@ async def output_text(text: str, paste: bool = None):
         await paste_text(text, restore_clipboard=Config.restore_clip)
     else:
         logger.debug(f"output_text: keyboard.write '{text}'")
-        keyboard.write(text)
+        _write_text(text)

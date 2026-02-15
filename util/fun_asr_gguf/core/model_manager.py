@@ -57,19 +57,25 @@ class ModelManager:
         
         self._initialized = False
 
-    def _apply_vulkan_config(self):
-        """根据配置应用 Vulkan 相关的环境变量"""
+    def _apply_gpu_config(self):
+        """根据平台应用 GPU 后端配置。"""
+        if sys.platform == "darwin":
+            if self.config.metal_enable:
+                os.environ.pop("GGML_METAL", None)
+                logger.info("GPU 加速: 已启用 Metal (decoder)")
+            else:
+                os.environ["GGML_METAL"] = "0"
+                logger.info("GPU 加速: 已禁用 Metal，decoder 使用 CPU")
+            return
+
         if not self.config.vulkan_enable:
-            # 强制禁用 Vulkan 推理
             os.environ["VK_ICD_FILENAMES"] = "none"
-            logger.info("GPU 加速: 已禁用 (vulkan_enable=False)")
+            logger.info("GPU 加速: 已禁用 Vulkan，decoder 使用 CPU")
         else:
-            # 启用 Vulkan 并根据配置调整精度
             if self.config.vulkan_force_fp32:
                 os.environ["GGML_VK_DISABLE_F16"] = "1"
                 logger.info("GPU 加速: 已启用 Vulkan (强制 FP32 模式)")
             else:
-                # 清理环境变量，确保不残留之前的设置
                 os.environ.pop("GGML_VK_DISABLE_F16", None)
                 os.environ.pop("VK_ICD_FILENAMES", None)
                 logger.info("GPU 加速: 已启用 Vulkan (自动精度模式)")
@@ -81,19 +87,24 @@ class ModelManager:
         t_start = time.perf_counter()
         
         # 0. 应用 GPU 配置
-        self._apply_vulkan_config()
+        self._apply_gpu_config()
         
         # 1. ONNX
         vprint("[1/6] 加载 ONNX 模型...", verbose)
         self.encoder_sess, self.ctc_sess, _ = load_onnx_models(
             self.config.encoder_onnx_path,
             self.config.ctc_onnx_path,
-            dml_enable=self.config.dml_enable
+            dml_enable=self.config.dml_enable,
+            coreml_enable=self.config.coreml_enable,
+            padding_mode=self.config.onnx_padding_mode,
+            padding_secs=self.config.onnx_padding_secs,
         )
 
         # 2. GGUF
         vprint("[2/6] 加载 GGUF LLM Decoder...", verbose)
-        self.model = llama.LlamaModel(self.config.decoder_gguf_path, n_gpu_layers=-1)
+        gpu_enabled = self.config.metal_enable if sys.platform == "darwin" else self.config.vulkan_enable
+        n_gpu_layers = -1 if gpu_enabled else 0
+        self.model = llama.LlamaModel(self.config.decoder_gguf_path, n_gpu_layers=n_gpu_layers)
         if not self.model.ptr:
             gguf_load_fail()
         
@@ -158,4 +169,3 @@ class ModelManager:
             
         self._initialized = False
         logger.info("[ASR] 资源已释放")
-

@@ -5,7 +5,7 @@ colorama
 markdown
 
 # system, input, hardware
-keyboard
+keyboard; platform_system == "Windows"
 pynput
 pyclip
 sounddevice

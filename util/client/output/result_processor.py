@@ -109,6 +109,9 @@ class ResultProcessor:
         
         用于调试按键卡住问题。
         """
+        import platform
+        if platform.system() != 'Windows':
+            return
         try:
             import keyboard
             
@@ -126,6 +129,8 @@ class ResultProcessor:
         """主处理循环"""
         if not await self._ws_manager.connect():
             logger.warning("WebSocket 连接检查失败")
+            # 避免连接失败时快速空转导致高 CPU / 日志刷屏
+            await asyncio.sleep(1.0)
             return
 
         console.print('[green]连接成功\n')

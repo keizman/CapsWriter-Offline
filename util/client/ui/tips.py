@@ -97,7 +97,7 @@ class TipsDisplay:
         console.print(Markdown(markdown), highlight=True)
         console.rule()
         console.print(f'\n当前基文件夹：[cyan underline]{os.getcwd()}')
-        console.print(f'\n服务端地址： [cyan underline]{Config.addr}:{Config.port}')
+        console.print(f'\n服务端地址： [cyan underline]{Config.server_display()}')
         console.print(f'\n当前所用快捷键：[green4]{shortcuts_display}')
         console.line()
 
@@ -111,6 +111,6 @@ class TipsDisplay:
         markdown = '\n项目地址：https://github.com/HaujetZhao/CapsWriter-Offline'
         console.print(Markdown(markdown), highlight=True)
         console.print(f'当前基文件夹：[cyan underline]{os.getcwd()}')
-        console.print(f'服务端地址： [cyan underline]{Config.addr}:{Config.port}')
+        console.print(f'服务端地址： [cyan underline]{Config.server_display()}')
         
         logger.debug("已显示文件转录模式启动提示")

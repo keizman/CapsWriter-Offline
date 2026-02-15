@@ -15,6 +15,16 @@ from util.common.lifecycle import lifecycle
 from . import logger
 
 
+def _wait_for_enter_if_interactive() -> None:
+    """仅在交互终端等待回车，避免 CI/子进程场景抛 EOFError。"""
+    if not sys.stdin or not sys.stdin.isatty():
+        return
+    try:
+        input('按回车退出')
+    except EOFError:
+        pass
+
+
 
 def check_model() -> None:
     """
@@ -67,7 +77,7 @@ def check_model() -> None:
     - 'paraformer'
 
         ''', style='bright_red')
-        input('按回车退出')
+        _wait_for_enter_if_interactive()
         lifecycle.cleanup()
         sys.exit(1)
 
@@ -97,7 +107,7 @@ def check_model() -> None:
         
         logger.error(f"模型文件检查失败，共 {len(missing_files)} 个文件缺失")
         console.print(error_msg)
-        input('按回车退出')
+        _wait_for_enter_if_interactive()
         lifecycle.cleanup()
         sys.exit(1)
 

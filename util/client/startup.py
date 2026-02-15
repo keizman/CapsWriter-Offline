@@ -94,9 +94,11 @@ def setup_client_components(base_dir):
     state = get_state()
     state.initialize()
 
-    # 1. 托盘
-    if Config.enable_tray:
+    # 1. 托盘（阶段性策略：仅 Windows 默认启用）
+    if Config.enable_tray and system() == 'Windows':
         _setup_tray(state, base_dir)
+    elif Config.enable_tray and system() != 'Windows':
+        logger.info("当前平台暂不启用托盘，已跳过。")
 
     # 2. UI 提示
     TipsDisplay.show_mic_tips()
@@ -154,4 +156,3 @@ def setup_client_components(base_dir):
 
     logger.info("客户端初始化完成，等待语音输入...")
     return state
-
