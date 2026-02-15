@@ -18,6 +18,7 @@ from util.server.server_classes import Task, Result
 from util.tools.chinese_itn import chinese_to_num
 from util.tools.format_tools import adjust_space
 from . import logger
+from .translate_prefix import maybe_translate_prefixed_text
 from rich import inspect
 
 # 导入拆分出去的模块
@@ -185,6 +186,15 @@ def recognize(recognizer, punc_model, task: Task) -> Result:
                 result.tokens = chars
                 result.timestamps = [i * time_per_char for i in range(len(chars))]
                 logger.warning(f"模型无时间戳，使用粗略估计: {len(chars)} 字符, {result.duration:.2f}s")
+
+        # 9. 句首翻译指令（服务端处理）
+        translated_text = maybe_translate_prefixed_text(result.text)
+        if translated_text:
+            result.text = translated_text
+            result.text_accu = translated_text
+            # 翻译结果无法与原始时间戳对齐，清空 token/timestamps。
+            result.tokens = []
+            result.timestamps = []
         
         result = _results.pop(task.task_id)
         result.is_final = True

@@ -15,6 +15,7 @@ import websockets
 from config_server import ServerConfig as Config
 from util.server.server_cosmic import console, Cosmic
 from util.server.server_classes import Task
+from util.server.queue_guard import queue_guard
 from util.constants import AudioFormat
 from util.tools.my_status import Status
 from . import logger
@@ -170,7 +171,8 @@ async def message_handler(websocket, message: dict, cache: AudioCache) -> None:
                     context=context
                 )
                 cache.offset += seg_duration
-                queue_in.put(task)
+                if queue_guard.try_enqueue(task):
+                    queue_in.put(task)
                 logger.debug(
                     f"提交音频片段，任务ID: {task_id}, "
                     f"偏移: {cache.offset}s, 缓冲区: {len(cache.chunks)} bytes"
@@ -197,7 +199,8 @@ async def message_handler(websocket, message: dict, cache: AudioCache) -> None:
                 time_submit=time.time(),
                 context=context
             )
-            queue_in.put(task)
+            if queue_guard.try_enqueue(task):
+                queue_in.put(task)
             logger.debug(f"提交最终片段，任务ID: {task_id}, 数据大小: {len(cache.chunks)} bytes")
 
             # 重置缓冲区
@@ -263,5 +266,6 @@ async def ws_recv(websocket) -> None:
         # 清理识别结果缓存，防止内存泄漏
         from util.server.server_recognize import clear_results_by_socket_id
         clear_results_by_socket_id(socket_id)
+        queue_guard.on_socket_closed(socket_id)
         
         logger.debug(f"客户端资源已清理: {socket_id}")

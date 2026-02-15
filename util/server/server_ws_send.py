@@ -4,7 +4,8 @@ import asyncio
 from multiprocessing import Queue
 
 from util.server.server_cosmic import console, Cosmic
-from util.server.server_classes import Result
+from util.server.server_classes import Result, QueueAck
+from util.server.queue_guard import queue_guard
 from util.tools.asyncio_to_thread import to_thread
 from . import logger
 from rich import inspect
@@ -28,6 +29,18 @@ async def ws_send():
                 logger.info("收到退出通知，停止发送任务")
                 return
 
+            # 队列回执（如：识别进程丢弃过期片段）
+            if isinstance(result, QueueAck):
+                queue_guard.on_task_done(result.socket_id)
+                if result.dropped:
+                    logger.info(
+                        "片段已丢弃: task=%s socket=%s reason=%s",
+                        result.task_id,
+                        result.socket_id,
+                        result.reason,
+                    )
+                continue
+
             # 构建消息
             message = {
                 'task_id': result.task_id,
@@ -49,11 +62,13 @@ async def ws_send():
             )
 
             if not websocket:
+                queue_guard.on_task_done(result.socket_id)
                 logger.warning(f"客户端 {result.socket_id} 不存在，跳过发送结果，任务ID: {result.task_id}")
                 continue
 
             # 发送消息
             await websocket.send(json.dumps(message))
+            queue_guard.on_task_done(result.socket_id)
             logger.debug(f"发送识别结果，任务ID: {result.task_id}, 文本长度: {len(result.text)}")
 
             if result.source == 'mic':
@@ -69,5 +84,4 @@ async def ws_send():
         except Exception as e:
             logger.error(f"发送结果时发生错误: {e}", exc_info=True)
             print(e)
-
 

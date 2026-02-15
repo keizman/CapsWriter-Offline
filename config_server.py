@@ -102,6 +102,59 @@ class ServerConfig:
     # 日志配置
     log_level = 'INFO'        # 日志级别：'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'
 
+    # 实时队列控制（仅内存队列，不落盘）
+    queue_max_total = _cfg_int(
+        "CAPSWRITER_QUEUE_MAX_TOTAL",
+        "server", "queue_max_total",
+        default=30
+    )
+    queue_max_per_client = _cfg_int(
+        "CAPSWRITER_QUEUE_MAX_PER_CLIENT",
+        "server", "queue_max_per_client",
+        default=3
+    )
+    # 非 final 片段在队列中的最大等待秒数，超时丢弃
+    queue_stale_secs = float(
+        _cfg(
+            "CAPSWRITER_QUEUE_STALE_SECS",
+            "server", "queue_stale_secs",
+            default=2.0
+        )
+    )
+
+    # 前缀翻译指令（服务端处理，客户端无感）
+    translate_command_enable = _cfg_bool(
+        "CAPSWRITER_TRANSLATE_CMD_ENABLE",
+        "server", "translate_command_enable",
+        default=True
+    )
+    translate_server_url = str(
+        _cfg(
+            "CAPSWRITER_TRANSLATE_SERVER_URL",
+            "server", "translate_server_url",
+            default="http://127.0.0.1:8909"
+        )
+    ).strip().rstrip("/")
+    translate_timeout_ms = _cfg_int(
+        "CAPSWRITER_TRANSLATE_TIMEOUT_MS",
+        "server", "translate_timeout_ms",
+        default=5000
+    )
+    translate_source_lang = str(
+        _cfg(
+            "CAPSWRITER_TRANSLATE_SOURCE_LANG",
+            "server", "translate_source_lang",
+            default="auto"
+        )
+    ).strip() or "auto"
+    translate_api_token = str(
+        _cfg(
+            "CAPSWRITER_TRANSLATE_API_TOKEN",
+            "server", "translate_api_token",
+            default=""
+        )
+    ).strip()
+
 
 
 

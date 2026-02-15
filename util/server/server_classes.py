@@ -83,3 +83,17 @@ class Result:
     timestamps: List[float] = field(default_factory=list)
     
     is_final: bool = False
+
+
+@dataclass
+class QueueAck:
+    """
+    队列回执（不发送给客户端）。
+
+    用于主进程维护排队计数，例如：
+    - 识别进程主动丢弃过期片段
+    """
+    socket_id: str
+    task_id: str
+    dropped: bool = False
+    reason: str = ""

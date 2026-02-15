@@ -10,6 +10,7 @@ from config_server import ParaformerArgs, ModelPaths, SenseVoiceArgs, FunASRNano
 from util.server.server_check_model import check_model
 from util.server.server_cosmic import console
 from util.server.server_recognize import recognize
+from util.server.server_classes import QueueAck
 
 from . import logger
 
@@ -167,6 +168,27 @@ def init_recognizer(queue_in: Queue, queue_out: Queue, sockets_id, stdin_fn):
         if task.socket_id not in sockets_id:    # 检查任务所属的连接是否存活
             logger.debug(f"任务所属连接已断开，跳过处理，任务ID: {task.task_id}")
             continue
+
+        # 非 final 片段超过等待阈值时丢弃（实时输入优先低延迟）
+        if not task.is_final:
+            wait_secs = time.time() - float(task.time_submit)
+            if wait_secs > float(Config.queue_stale_secs):
+                logger.info(
+                    "丢弃过期片段: task=%s socket=%s wait=%.3fs limit=%.3fs",
+                    task.task_id,
+                    task.socket_id,
+                    wait_secs,
+                    Config.queue_stale_secs,
+                )
+                queue_out.put(
+                    QueueAck(
+                        socket_id=task.socket_id,
+                        task_id=task.task_id,
+                        dropped=True,
+                        reason="stale",
+                    )
+                )
+                continue
 
         result = recognize(recognizer, punc_model, task)   # 执行识别
         queue_out.put(result)      # 返回结果

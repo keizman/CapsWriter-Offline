@@ -4,7 +4,15 @@
     "port": "6016",
     "secret": "replace-with-your-secret",
     "model_type": "fun_asr_nano",
-    "enable_tray": false
+    "enable_tray": false,
+    "translate_command_enable": true,
+    "translate_server_url": "http://127.0.0.1:8909",
+    "translate_timeout_ms": 5000,
+    "translate_source_lang": "auto",
+    "translate_api_token": "",
+    "queue_max_total": 30,
+    "queue_max_per_client": 3,
+    "queue_stale_secs": 2.0
   },
   "fun_asr_nano": {
     "device_mode": "gpu",
