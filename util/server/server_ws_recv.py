@@ -8,9 +8,11 @@ WebSocket 接收处理模块
 import json
 import time
 from base64 import b64decode
+from http import HTTPStatus
 
 import websockets
 
+from config_server import ServerConfig as Config
 from util.server.server_cosmic import console, Cosmic
 from util.server.server_classes import Task
 from util.constants import AudioFormat
@@ -21,6 +23,65 @@ from . import logger
 
 # 麦克风接收状态指示器
 status_mic = Status('正在接收音频', spinner='point')
+
+
+def _get_request_header(websocket, key: str) -> str:
+    """
+    兼容不同 websockets 版本，读取握手请求头。
+    """
+    # websockets >= 14
+    request = getattr(websocket, "request", None)
+    if request is not None:
+        headers = getattr(request, "headers", None)
+        if headers is not None:
+            value = headers.get(key)
+            if value is not None:
+                return str(value)
+
+    # websockets 旧版本
+    headers = getattr(websocket, "request_headers", None)
+    if headers is not None:
+        value = headers.get(key)
+        if value is not None:
+            return str(value)
+
+    return ""
+
+
+async def _authorize_websocket(websocket) -> bool:
+    """
+    校验客户端 secret，不一致则拒绝连接。
+    """
+    expected_secret = str(getattr(Config, "secret", "")).strip()
+    if not expected_secret:
+        return True
+
+    provided_secret = _get_request_header(websocket, "X-CapsWriter-Secret").strip()
+    if provided_secret != expected_secret:
+        logger.warning("拒绝客户端连接：secret 不匹配")
+        try:
+            await websocket.close(code=4403, reason="forbidden: invalid secret")
+        except Exception:
+            pass
+        return False
+
+    return True
+
+
+def process_ws_request(connection, request):
+    """
+    在握手阶段校验 secret，不一致则返回 HTTP 403。
+    """
+    expected_secret = str(getattr(Config, "secret", "")).strip()
+    if not expected_secret:
+        return None
+
+    provided_secret = str(request.headers.get("X-CapsWriter-Secret", "")).strip()
+    if provided_secret != expected_secret:
+        logger.warning("拒绝客户端连接：握手 secret 不匹配")
+        return connection.respond(HTTPStatus.FORBIDDEN, "Forbidden: invalid secret")
+
+    return None
 
 
 class AudioCache:
@@ -154,6 +215,10 @@ async def ws_recv(websocket) -> None:
     处理单个客户端连接，接收音频数据并分发处理。
     """
     global status_mic
+
+    # 鉴权失败则直接拒绝
+    if not await _authorize_websocket(websocket):
+        return
 
     # 登记 socket 到连接池
     sockets = Cosmic.sockets

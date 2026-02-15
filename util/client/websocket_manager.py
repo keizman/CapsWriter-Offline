@@ -13,7 +13,7 @@ import json
 from typing import TYPE_CHECKING, Optional
 
 import websockets
-from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
+from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK, InvalidStatus
 
 from config_client import ClientConfig as Config
 from . import logger
@@ -71,16 +71,28 @@ class WebSocketManager:
             self.state.websocket = None
         
         url = Config.websocket_url()
+        headers = {}
+        if Config.secret:
+            headers["X-CapsWriter-Secret"] = Config.secret
         
         for attempt in range(1, self.max_retries + 1):
             try:
                 logger.debug(f"正在连接服务端 {url} (尝试 {attempt}/{self.max_retries})")
-                
-                self.state.websocket = await websockets.connect(
-                    url,
-                    subprotocols=["binary"],
-                    max_size=None
-                )
+
+                connect_kwargs = {
+                    "subprotocols": ["binary"],
+                    "max_size": None,
+                }
+                if headers:
+                    connect_kwargs["additional_headers"] = headers
+
+                try:
+                    self.state.websocket = await websockets.connect(url, **connect_kwargs)
+                except TypeError:
+                    # 兼容旧版 websockets 参数名
+                    if "additional_headers" in connect_kwargs:
+                        connect_kwargs["extra_headers"] = connect_kwargs.pop("additional_headers")
+                    self.state.websocket = await websockets.connect(url, **connect_kwargs)
                 
                 logger.info(f"WebSocket 连接成功: {url}")
                 return True
@@ -89,6 +101,14 @@ class WebSocketManager:
                 logger.warning(f"连接被拒绝 (尝试 {attempt}/{self.max_retries})")
             except TimeoutError:
                 logger.warning(f"连接超时 (尝试 {attempt}/{self.max_retries})")
+            except InvalidStatus as e:
+                # 例如服务端因 secret 校验失败返回 HTTP 403
+                response = getattr(e, "response", None)
+                status_code = getattr(response, "status_code", None)
+                if status_code is None:
+                    status_code = getattr(response, "status", "unknown")
+                logger.error(f"服务端拒绝连接 (HTTP {status_code})，请检查 secret 是否一致")
+                break
             except Exception as e:
                 logger.error(f"连接失败: {e} (尝试 {attempt}/{self.max_retries})")
 

@@ -130,6 +130,8 @@ class ClientConfig:
     server_uri = _normalize_ws_uri(
         str(_cfg("CAPSWRITER_CLIENT_SERVER_URI", "server", "uri", default="")).strip()
     ) or _legacy_server_uri() or "ws://127.0.0.1:6016"
+    # 连接密钥：需与服务端一致
+    secret = str(_cfg("CAPSWRITER_CLIENT_SECRET", "server", "secret", default="")).strip()
 
     @classmethod
     def websocket_url(cls) -> str:

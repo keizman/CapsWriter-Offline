@@ -1,5 +1,6 @@
 {
   "server": {
-    "uri": "ws://192.168.1.50:6016"
+    "uri": "ws://192.168.1.50:6016",
+    "secret": "replace-with-your-secret"
   }
 }

@@ -5,7 +5,7 @@ from platform import system
 import asyncio
 import websockets
 from config_server import ServerConfig as Config, __version__
-from util.server.server_ws_recv import ws_recv
+from util.server.server_ws_recv import ws_recv, process_ws_request
 from util.server.server_ws_send import ws_send
 from util.tools.empty_working_set import empty_current_working_set
 from util.logger import setup_logger
@@ -93,6 +93,7 @@ async def run_websocket_server():
     async with websockets.serve(ws_recv,
                                 Config.addr,
                                 Config.port,
+                                process_request=process_ws_request,
                                 subprotocols=["binary"],
                                 max_size=None):
         

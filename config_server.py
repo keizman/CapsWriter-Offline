@@ -84,6 +84,8 @@ def _cfg_int(env_name: str, *keys, default: int) -> int:
 class ServerConfig:
     addr = str(_cfg("CAPSWRITER_SERVER_ADDR", "server", "addr", default='0.0.0.0'))
     port = str(_cfg("CAPSWRITER_SERVER_PORT", "server", "port", default='6016'))
+    # 连接密钥：客户端必须与服务端一致，否则拒绝连接
+    secret = str(_cfg("CAPSWRITER_SERVER_SECRET", "server", "secret", default="")).strip()
 
     # 语音模型选择：'fun_asr_nano', 'sensevoice', 'paraformer'
     model_type = str(_cfg("CAPSWRITER_MODEL_TYPE", "server", "model_type", default='fun_asr_nano'))
