@@ -82,33 +82,64 @@ def _cfg(env_name: str, *keys, default=None):
     return _get_override(*keys, default=default)
 
 
+def _normalize_ws_uri(uri: str) -> str:
+    """规范化服务端地址为 ws/wss URI。"""
+    text = str(uri or "").strip()
+    if not text:
+        return ""
+
+    lower = text.lower()
+    if lower.startswith("ws://") or lower.startswith("wss://"):
+        return text
+    if lower.startswith("http://"):
+        return "ws://" + text[len("http://"):]
+    if lower.startswith("https://"):
+        return "wss://" + text[len("https://"):]
+    return f"ws://{text}"
+
+
+def _legacy_server_uri() -> str:
+    """
+    兼容旧版 addr/port 配置，自动转换为 URI。
+
+    优先级：
+    1) 环境变量 CAPSWRITER_CLIENT_ADDR / CAPSWRITER_CLIENT_PORT
+    2) 本地配置 server.addr / server.port
+    """
+    env_addr = os.getenv("CAPSWRITER_CLIENT_ADDR")
+    env_port = os.getenv("CAPSWRITER_CLIENT_PORT")
+
+    if env_addr or env_port:
+        addr = (env_addr or "127.0.0.1").strip()
+        port = (env_port or "6016").strip()
+        return f"ws://{addr}:{port}"
+
+    cfg_addr = _get_override("server", "addr", default=None)
+    cfg_port = _get_override("server", "port", default=None)
+    if cfg_addr or cfg_port:
+        addr = str(cfg_addr or "127.0.0.1").strip()
+        port = str(cfg_port or "6016").strip()
+        return f"ws://{addr}:{port}"
+
+    return ""
+
+
 # 客户端配置
 class ClientConfig:
-    addr = str(_cfg("CAPSWRITER_CLIENT_ADDR", "server", "addr", default='127.0.0.1'))   # Server 地址
-    port = str(_cfg("CAPSWRITER_CLIENT_PORT", "server", "port", default='6016'))         # Server 端口
-    server_uri = str(_cfg("CAPSWRITER_CLIENT_SERVER_URI", "server", "uri", default='')).strip()
+    # 唯一服务端地址配置（支持 ws:// / wss:// / http:// / https:// / host:port）
+    server_uri = _normalize_ws_uri(
+        str(_cfg("CAPSWRITER_CLIENT_SERVER_URI", "server", "uri", default="")).strip()
+    ) or _legacy_server_uri() or "ws://127.0.0.1:6016"
 
     @classmethod
     def websocket_url(cls) -> str:
         """返回最终 WebSocket 连接地址。"""
-        uri = cls.server_uri
-        if uri:
-            lower = uri.lower()
-            if lower.startswith("ws://") or lower.startswith("wss://"):
-                return uri
-            if lower.startswith("http://"):
-                return "ws://" + uri[len("http://"):]
-            if lower.startswith("https://"):
-                return "wss://" + uri[len("https://"):]
-            return f"ws://{uri}"
-        return f"ws://{cls.addr}:{cls.port}"
+        return cls.server_uri
 
     @classmethod
     def server_display(cls) -> str:
         """返回用于 UI 显示的服务端地址。"""
-        if cls.server_uri:
-            return cls.server_uri
-        return f"{cls.addr}:{cls.port}"
+        return cls.server_uri
 
     # 快捷键配置列表
     shortcuts = (
