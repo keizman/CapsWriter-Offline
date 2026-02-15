@@ -2,6 +2,7 @@ import sys
 import os
 import ctypes
 import codecs
+import shutil
 import numpy as np
 import gguf
 from typing import List, Union
@@ -182,6 +183,55 @@ def _resolve_llama_lib_dir() -> Path:
     return module_bin
 
 
+def _ensure_macos_llama_rpath(lib_dir: Path) -> Path:
+    """
+    修复 macOS 下 llama/ggml 的 @rpath 依赖路径。
+
+    某些预编译 dylib 的 rpath 固定为 @loader_path/../lib。
+    当前项目把库放在 util/fun_asr_gguf/bin，因此需要准备 ../lib。
+    """
+    compat_lib_dir = lib_dir.parent / "lib"
+    if sys.platform != "darwin":
+        return compat_lib_dir
+
+    try:
+        compat_lib_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        logger.warning(f"创建兼容库目录失败: {compat_lib_dir} ({e})")
+
+    for dylib in lib_dir.glob("*.dylib"):
+        target = compat_lib_dir / dylib.name
+        if target.exists():
+            continue
+
+        try:
+            # 使用相对软链接，避免重复拷贝大文件。
+            target.symlink_to(Path("..") / "bin" / dylib.name)
+            continue
+        except Exception:
+            pass
+
+        try:
+            shutil.copy2(dylib, target)
+        except Exception as e:
+            logger.warning(f"补齐依赖库失败: {target} ({e})")
+
+    # 为当前进程补充 dyld 搜索路径（兜底）
+    dyld_paths = [lib_dir.as_posix(), compat_lib_dir.as_posix()]
+    existing = os.environ.get("DYLD_FALLBACK_LIBRARY_PATH", "")
+    if existing:
+        dyld_paths.append(existing)
+    os.environ["DYLD_FALLBACK_LIBRARY_PATH"] = ":".join(dyld_paths)
+
+    existing_lib = os.environ.get("DYLD_LIBRARY_PATH", "")
+    dyld_lib_paths = [lib_dir.as_posix(), compat_lib_dir.as_posix()]
+    if existing_lib:
+        dyld_lib_paths.append(existing_lib)
+    os.environ["DYLD_LIBRARY_PATH"] = ":".join(dyld_lib_paths)
+
+    return compat_lib_dir
+
+
 def init_llama_lib():
     """初始化 llama.cpp 库，支持跨平台加载"""
     global llama, ggml, ggml_base
@@ -202,7 +252,9 @@ def init_llama_lib():
         return
 
     # 获取库文件所在目录（支持 .app 同级项目目录）
-    lib_dir = _resolve_llama_lib_dir().as_posix()
+    lib_dir_path = _resolve_llama_lib_dir()
+    compat_lib_dir = _ensure_macos_llama_rpath(lib_dir_path)
+    lib_dir = lib_dir_path.as_posix()
 
     # DLL 命名处理
     if sys.platform == "win32":
@@ -218,9 +270,36 @@ def init_llama_lib():
         GGML_BASE_DLL = "libggml-base.so"
         LLAMA_DLL = "libllama.so"
 
-    ggml = ctypes.CDLL(os.path.join(lib_dir, GGML_DLL))
-    ggml_base = ctypes.CDLL(os.path.join(lib_dir, GGML_BASE_DLL))
-    llama = ctypes.CDLL(os.path.join(lib_dir, LLAMA_DLL))
+    # macOS 先预加载依赖，减少 @rpath 解析失败概率。
+    if sys.platform == "darwin":
+        preload = [
+            "libggml-base.0.dylib",
+            "libggml-cpu.0.dylib",
+            "libggml-blas.0.dylib",
+            "libggml-metal.0.dylib",
+        ]
+        for name in preload:
+            loaded = False
+            for base in (lib_dir_path, compat_lib_dir):
+                candidate = base / name
+                if not candidate.exists():
+                    continue
+                try:
+                    ctypes.CDLL(candidate.as_posix(), mode=ctypes.RTLD_GLOBAL)
+                    loaded = True
+                    break
+                except OSError:
+                    continue
+            if not loaded:
+                logger.warning(f"预加载依赖失败（未找到或不可加载）: {name}")
+
+        ggml = ctypes.CDLL(os.path.join(lib_dir, GGML_DLL), mode=ctypes.RTLD_GLOBAL)
+        ggml_base = ctypes.CDLL(os.path.join(lib_dir, GGML_BASE_DLL), mode=ctypes.RTLD_GLOBAL)
+        llama = ctypes.CDLL(os.path.join(lib_dir, LLAMA_DLL), mode=ctypes.RTLD_GLOBAL)
+    else:
+        ggml = ctypes.CDLL(os.path.join(lib_dir, GGML_DLL))
+        ggml_base = ctypes.CDLL(os.path.join(lib_dir, GGML_BASE_DLL))
+        llama = ctypes.CDLL(os.path.join(lib_dir, LLAMA_DLL))
 
     # 设置日志回调
     LOG_CALLBACK = ctypes.CFUNCTYPE(None, ctypes.c_int, ctypes.c_char_p, ctypes.c_void_p)

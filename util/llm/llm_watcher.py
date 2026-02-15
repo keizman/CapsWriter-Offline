@@ -12,8 +12,17 @@ LLM 配置文件监控
 
 import time
 import threading
+import warnings
 from pathlib import Path
 from typing import Callable, Dict, List, Any, Optional
+
+# macOS 未安装 fsevents 时 watchdog 会降级到 kqueue，这是正常行为。
+warnings.filterwarnings(
+    "ignore",
+    message="Failed to import fsevents. Fall back to kqueue",
+    category=UserWarning,
+)
+
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from util.llm.llm_constants import WatcherConstants

@@ -10,8 +10,16 @@ from __future__ import annotations
 import threading
 import time
 import unicodedata
+import warnings
 from pathlib import Path
 from typing import Dict, Callable, Optional, TYPE_CHECKING, Any, Tuple
+
+# macOS 未安装 fsevents 时 watchdog 会降级到 kqueue，这是正常行为。
+warnings.filterwarnings(
+    "ignore",
+    message="Failed to import fsevents. Fall back to kqueue",
+    category=UserWarning,
+)
 
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
