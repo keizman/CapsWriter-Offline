@@ -1,11 +1,36 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")"
-APP="./CapsWriter-Server-mac-app-fix5.app/Contents/MacOS/CapsWriter-Server-mac-app-fix5"
 
-if [[ ! -x "$APP" ]]; then
-  echo "[ERROR] Server executable not found: $APP"
-  echo "Please make sure CapsWriter-Server-mac-app-fix5.app is in this folder."
+find_server_exec() {
+  local app macos bin
+
+  # 优先稳定命名
+  app="./CapsWriter-Server.app"
+  if [[ -d "$app/Contents/MacOS" ]]; then
+    for bin in "$app/Contents/MacOS/"*; do
+      [[ -x "$bin" ]] && { echo "$bin"; return 0; }
+    done
+  fi
+
+  # 回退：匹配历史命名（按最新修改时间优先）
+  while IFS= read -r app; do
+    macos="$app/Contents/MacOS"
+    [[ -d "$macos" ]] || continue
+    for bin in "$macos/"*; do
+      [[ -x "$bin" ]] && { echo "$bin"; return 0; }
+    done
+  done < <(ls -td ./CapsWriter-Server*.app 2>/dev/null || true)
+
+  return 1
+}
+
+APP="$(find_server_exec || true)"
+if [[ -z "$APP" ]]; then
+  echo "[ERROR] Server executable not found."
+  echo "Expected one of:"
+  echo "  - ./CapsWriter-Server.app"
+  echo "  - ./CapsWriter-Server*.app"
   read -r -p "Press Enter to exit..." _
   exit 1
 fi
