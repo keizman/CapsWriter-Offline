@@ -79,5 +79,12 @@ def cleanup_client_resources():
     except Exception as e:
         logger.warning(f"停止托盘图标时发生错误: {e}")
 
+    # 停止 Flow Bar 状态窗
+    try:
+        from util.client.ui import stop_flow_bar
+        stop_flow_bar()
+    except Exception as e:
+        logger.warning(f"停止 Flow Bar 时发生错误: {e}")
+
     logger.info("客户端资源清理完成")
     console.print('[green4]再见！')

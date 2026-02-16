@@ -103,6 +103,16 @@ def setup_client_components(base_dir):
     # 2. UI 提示
     TipsDisplay.show_mic_tips()
 
+    # 2.1 录音状态 Flow Bar（跨平台悬浮状态窗）
+    try:
+        from util.client.ui import start_flow_bar, set_flow_state_resting
+
+        start_flow_bar()
+        set_flow_state_resting()
+        logger.info("Flow Bar 已启动")
+    except Exception as e:
+        logger.warning(f"Flow Bar 启动失败，已降级为无状态窗模式: {e}")
+
     # 3. 热词
     logger.info("正在加载热词...")
     hotword_files = {

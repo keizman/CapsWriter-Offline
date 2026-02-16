@@ -17,6 +17,7 @@ import numpy as np
 import sounddevice as sd
 
 from util.client.state import console, get_state
+from util.client.ui import set_flow_audio_level
 from . import logger
 from util.common.lifecycle import lifecycle
 
@@ -70,7 +71,16 @@ class AudioStreamManager:
         # 只在录音状态时处理数据
         if not self.state.recording:
             return
-        
+
+        # 更新 Flow Bar 音量级别（0~1）
+        try:
+            # 使用 RMS 估算语音强度，压缩并限制到可视化范围
+            rms = float(np.sqrt(np.mean(np.square(indata))))
+            level = min(1.0, max(0.0, rms * 7.5))
+            set_flow_audio_level(level)
+        except Exception:
+            pass
+
         import asyncio
         
         # 将数据放入队列

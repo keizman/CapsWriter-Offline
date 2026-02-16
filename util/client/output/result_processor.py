@@ -18,6 +18,7 @@ from util.client.state import console
 from util.client.websocket_manager import WebSocketManager
 from util.hotword import get_hotword_manager
 from util.client.output.text_output import TextOutput
+from util.client.ui import set_flow_state_resting
 from util.tools.window_detector import get_active_window_info
 from . import logger
 from util.common.lifecycle import lifecycle
@@ -391,6 +392,9 @@ class ResultProcessor:
 
         # 检测修饰键状态（调试用）
         self._log_modifier_key_state()
+
+        # 最终结果已完成输出，恢复到待触发状态
+        set_flow_state_resting()
 
         console.line()
     

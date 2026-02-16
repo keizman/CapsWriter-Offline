@@ -52,6 +52,36 @@ def on_edit_context(*args, **kwargs):
     return _on_edit_context(*args, **kwargs)
 
 
+def start_flow_bar(*args, **kwargs):
+    from util.client.ui.flow_bar import start_flow_bar as _start_flow_bar
+    return _start_flow_bar(*args, **kwargs)
+
+
+def stop_flow_bar(*args, **kwargs):
+    from util.client.ui.flow_bar import stop_flow_bar as _stop_flow_bar
+    return _stop_flow_bar(*args, **kwargs)
+
+
+def set_flow_state_resting(*args, **kwargs):
+    from util.client.ui.flow_bar import set_flow_state_resting as _set_flow_state_resting
+    return _set_flow_state_resting(*args, **kwargs)
+
+
+def set_flow_state_active_ptt(*args, **kwargs):
+    from util.client.ui.flow_bar import set_flow_state_active_ptt as _set_flow_state_active_ptt
+    return _set_flow_state_active_ptt(*args, **kwargs)
+
+
+def set_flow_state_processing(*args, **kwargs):
+    from util.client.ui.flow_bar import set_flow_state_processing as _set_flow_state_processing
+    return _set_flow_state_processing(*args, **kwargs)
+
+
+def set_flow_audio_level(*args, **kwargs):
+    from util.client.ui.flow_bar import set_flow_audio_level as _set_flow_audio_level
+    return _set_flow_audio_level(*args, **kwargs)
+
+
 def __getattr__(name: str):
     if name in ("ToastMessage", "ToastMessageManager"):
         from util.ui import ToastMessage, ToastMessageManager
@@ -75,4 +105,10 @@ __all__ = [
     'on_add_rectify_record',
     'on_add_hotword',
     'on_edit_context',
+    'start_flow_bar',
+    'stop_flow_bar',
+    'set_flow_state_resting',
+    'set_flow_state_active_ptt',
+    'set_flow_state_processing',
+    'set_flow_audio_level',
 ]

@@ -12,6 +12,11 @@ from typing import TYPE_CHECKING, Optional
 
 from . import logger
 from util.client.audio.cue_player import play_dictation_start, play_dictation_stop
+from util.client.ui import (
+    set_flow_state_active_ptt,
+    set_flow_state_processing,
+    set_flow_state_resting,
+)
 from util.tools.my_status import Status
 
 if TYPE_CHECKING:
@@ -68,6 +73,7 @@ class ShortcutTask:
         """启动录音任务"""
         logger.info(f"[{self.shortcut.key}] 触发：开始录音")
         play_dictation_start()
+        set_flow_state_active_ptt()
 
         # 记录开始时间
         self.recording_start_time = time.time()
@@ -96,6 +102,7 @@ class ShortcutTask:
         """取消录音任务（时间过短）"""
         logger.debug(f"[{self.shortcut.key}] 取消录音任务（时间过短）")
         play_dictation_stop()
+        set_flow_state_resting()
 
         self.is_recording = False
         self.state.stop_recording()
@@ -108,6 +115,7 @@ class ShortcutTask:
         """完成录音任务"""
         logger.info(f"[{self.shortcut.key}] 释放：完成录音")
         play_dictation_stop()
+        set_flow_state_processing()
 
         self.is_recording = False
         self.state.stop_recording()
