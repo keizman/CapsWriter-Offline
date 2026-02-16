@@ -37,6 +37,33 @@ def _estimate_tokens(text: str) -> int:
     return int(chinese_chars / 1.5 + other_chars / 4)
 
 
+def _should_force_paste(window_info: dict) -> tuple[bool, Optional[str]]:
+    """检测当前前台应用是否应强制使用粘贴模式。"""
+    if not window_info:
+        return False, None
+
+    # WeChat / RustDesk 场景中，模拟按键容易丢字或被远控层拦截，强制走粘贴更稳定。
+    compatibility_keywords = (
+        "weixin",
+        "wechat",
+        "微信",
+        "rustdesk",
+    )
+    fields = (
+        str(window_info.get("title", "")).lower(),
+        str(window_info.get("class_name", "")).lower(),
+        str(window_info.get("process_name", "")).lower(),
+        str(window_info.get("app_name", "")).lower(),
+    )
+
+    for keyword in compatibility_keywords:
+        token = keyword.lower()
+        if any(token and token in field for field in fields):
+            return True, keyword
+
+    return False, None
+
+
 class ResultProcessor:
     """
     识别结果处理器会车，会车处理器回车，回车处理器
@@ -301,12 +328,10 @@ class ResultProcessor:
         paste = Config.paste
         window_info = get_active_window_info()
 
-        if window_info:
-            window_title = window_info.get('title', '')
-            compatibility_apps = ['weixin', '微信', 'wechat', 'WeChat']
-            if window_title in compatibility_apps:
-                paste = True
-                logger.debug(f"检测到兼容性应用: {window_title}，使用粘贴模式")
+        should_force_paste, matched_keyword = _should_force_paste(window_info)
+        if should_force_paste:
+            paste = True
+            logger.debug(f"检测到兼容性应用关键词: {matched_keyword}，使用粘贴模式")
 
         # LLM 处理和输出
         llm_result = None
