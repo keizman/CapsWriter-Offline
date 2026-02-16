@@ -34,6 +34,20 @@ def _debug_base_resolution(message: str) -> None:
         print(f"[base_dir][client] {message}", flush=True)
 
 
+def _looks_like_client_root(path: Path) -> bool:
+    markers = (
+        "config_client.py",
+        "assets",
+        "LLM",
+        "config_client.local.json",
+        "hot.txt",
+        "hot-rule.txt",
+        "hot-rectify.txt",
+        "start_client.command",
+    )
+    return any((path / marker).exists() for marker in markers)
+
+
 # 确保根目录位置正确，用相对路径加载模型
 def _resolve_base_dir() -> str:
     """解析运行基目录，兼容 macOS .app 与源码运行。"""
@@ -52,15 +66,14 @@ def _resolve_base_dir() -> str:
             # 客户端放在项目根目录时，这些文件通常与 .app 同级
             _debug_base_resolution(
                 f"found_bundle={parent.as_posix()} app_parent={app_parent.as_posix()} "
-                f"config_exists={(app_parent / 'config_client.py').exists()} "
-                f"assets_exists={(app_parent / 'assets').exists()}"
+                f"has_root_markers={_looks_like_client_root(app_parent)}"
             )
-            if (app_parent / "config_client.py").exists() or (app_parent / "assets").exists():
+            if _looks_like_client_root(app_parent):
                 return app_parent.as_posix()
             # 找到 .app 但同级没有目标文件时，继续尝试其它候选路径
 
     cwd = Path.cwd()
-    if (cwd / "config_client.py").exists() or (cwd / "assets").exists():
+    if _looks_like_client_root(cwd):
         _debug_base_resolution(f"use_cwd={cwd.as_posix()}")
         return cwd.as_posix()
 

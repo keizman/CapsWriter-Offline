@@ -7,6 +7,7 @@ APP_NAME="CapsWriter-Client.app"
 CMD_FILE="start_client.command"
 DEFAULT_CONFIG="config_client.local.json"
 CONFIG_FILE="${1:-$DEFAULT_CONFIG}"
+REQUIRED_CLIENT_FILES=("hot.txt" "hot-rule.txt")
 
 RELEASE_DIR="release"
 STAMP="$(date +%Y%m%d-%H%M%S)"
@@ -47,6 +48,13 @@ if [[ ! -f "$CONFIG_FILE" ]]; then
   exit 1
 fi
 
+for f in "${REQUIRED_CLIENT_FILES[@]}"; do
+  if [[ ! -f "$f" ]]; then
+    echo "[ERROR] Missing required client file: $f"
+    exit 1
+  fi
+done
+
 mkdir -p "$RELEASE_DIR"
 rm -rf "$STAGE_DIR" "$ZIP_PATH"
 mkdir -p "$STAGE_DIR"
@@ -57,6 +65,10 @@ chmod +x "$STAGE_DIR/$CMD_FILE"
 
 # Always ship runtime config with the expected filename.
 cp "$CONFIG_FILE" "$STAGE_DIR/$DEFAULT_CONFIG"
+
+for f in "${REQUIRED_CLIENT_FILES[@]}"; do
+  cp "$f" "$STAGE_DIR/$f"
+done
 
 ditto -c -k --sequesterRsrc --keepParent "$STAGE_DIR" "$ZIP_PATH"
 rm -rf "$STAGE_DIR"

@@ -11,6 +11,20 @@ __version__ = '2.4'
 _IS_WINDOWS = platform.system() == 'Windows'
 
 
+def _looks_like_client_root(path: Path) -> bool:
+    markers = (
+        "config_client.py",
+        "assets",
+        "LLM",
+        "config_client.local.json",
+        "hot.txt",
+        "hot-rule.txt",
+        "hot-rectify.txt",
+        "start_client.command",
+    )
+    return any((path / marker).exists() for marker in markers)
+
+
 def _resolve_base_dir() -> str:
     """解析运行基目录，兼容 macOS .app 与源码运行。"""
     if not getattr(sys, "frozen", False):
@@ -22,17 +36,13 @@ def _resolve_base_dir() -> str:
     for parent in [exe_path, *exe_path.parents]:
         if parent.suffix == ".app":
             app_parent = parent.parent
-            if (
-                (app_parent / "config_client.py").exists()
-                or (app_parent / "assets").exists()
-                or (app_parent / "LLM").exists()
-            ):
+            if _looks_like_client_root(app_parent):
                 return app_parent.as_posix()
             break
 
     # 其次尝试当前工作目录
     cwd = Path.cwd()
-    if (cwd / "config_client.py").exists() or (cwd / "assets").exists() or (cwd / "LLM").exists():
+    if _looks_like_client_root(cwd):
         return cwd.as_posix()
 
     # 兜底：可执行文件目录
@@ -50,11 +60,20 @@ def _load_local_overrides() -> dict:
     默认文件名：config_client.local.json
     可通过 CAPSWRITER_CLIENT_CONFIG 指定路径。
     """
-    path = os.getenv("CAPSWRITER_CLIENT_CONFIG", "config_client.local.json")
-    if not os.path.exists(path):
+    path_str = os.getenv("CAPSWRITER_CLIENT_CONFIG", "config_client.local.json")
+    path = Path(path_str)
+    if not path.is_absolute():
+        cwd_path = Path.cwd() / path
+        base_path = Path(BASE_DIR) / path
+        if cwd_path.exists():
+            path = cwd_path
+        else:
+            path = base_path
+
+    if not path.exists():
         return {}
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with path.open("r", encoding="utf-8") as f:
             data = json.load(f)
         if isinstance(data, dict):
             return data
