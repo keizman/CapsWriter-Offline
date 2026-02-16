@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import re
+import string
 from dataclasses import dataclass
 from typing import Optional, Tuple
 from urllib import error, request
@@ -23,9 +24,12 @@ from . import logger
 
 _CN_PREFIXES = ("请翻译为", "请翻译")
 _EN_PREFIXES = ("please translate to", "please translate")
-_LEADING_SEPARATORS = " \t\r\n:：,，。;；!?！？、"
+_LEADING_SEPARATORS = " \t\r\n:：,，。.;；!?！？、…"
 _BRACKET_OPEN = "([{（【《<"
 _BRACKET_CLOSE = ")]}）】》>"
+_LEADING_PUNCT_CHARS = set(
+    string.punctuation + "，。！？；：、…·“”‘’「」『』（）【】《》〈〉"
+)
 
 
 _LANG_ALIASES_CN = {
@@ -96,6 +100,22 @@ class TranslateCommand:
 
 def _trim_leading_separators(text: str) -> str:
     return text.lstrip(_LEADING_SEPARATORS)
+
+
+def _strip_leading_punctuation(text: str) -> str:
+    """
+    清理翻译结果前导标点，避免输出以标点开头。
+    """
+    value = str(text or "")
+    idx = 0
+    length = len(value)
+    while idx < length:
+        ch = value[idx]
+        if ch.isspace() or ch in _LEADING_PUNCT_CHARS:
+            idx += 1
+            continue
+        break
+    return value[idx:].lstrip()
 
 
 def _strip_optional_brackets_prefix(text: str) -> str:
@@ -247,7 +267,8 @@ def _translate_via_mtran(text: str, target_lang: str) -> Optional[str]:
             .get("translatedText")
         )
         if translated:
-            return str(translated).strip()
+            cleaned = _strip_leading_punctuation(str(translated).strip())
+            return cleaned or str(translated).strip()
 
     # 兼容 MTran 原生接口（兜底）
     payload_native = {"from": source_lang, "to": target_lang, "text": text, "html": False}
@@ -255,7 +276,8 @@ def _translate_via_mtran(text: str, target_lang: str) -> Optional[str]:
     if isinstance(data, dict):
         translated = data.get("result") or data.get("translation") or data.get("translatedText")
         if translated:
-            return str(translated).strip()
+            cleaned = _strip_leading_punctuation(str(translated).strip())
+            return cleaned or str(translated).strip()
 
     return None
 
