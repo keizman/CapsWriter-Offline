@@ -4,6 +4,8 @@
 检测当前前台活动的应用程序信息，用于兼容性配置
 """
 import platform
+import ctypes
+from ctypes import wintypes
 
 
 def get_active_window_info() -> dict:
@@ -62,8 +64,61 @@ def _get_windows_window_info() -> dict:
             'app_name': app_name
         }
     except ImportError:
-        # 如果没有安装依赖，返回空信息
-        return {}
+        # 缺少 pywin32 时，回退到 ctypes 原生 WinAPI
+        return _get_windows_window_info_ctypes()
+    except Exception:
+        # pywin32 路径失败时，同样回退到 ctypes，提升鲁棒性
+        return _get_windows_window_info_ctypes()
+
+
+def _get_windows_window_info_ctypes() -> dict:
+    """Windows: 不依赖 pywin32 的前台窗口检测兜底实现。"""
+    try:
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+        psapi = ctypes.windll.psapi
+
+        hwnd = user32.GetForegroundWindow()
+        if not hwnd:
+            return {}
+
+        # 窗口标题
+        length = user32.GetWindowTextLengthW(hwnd)
+        title_buf = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(hwnd, title_buf, length + 1)
+        title = title_buf.value
+
+        # 窗口类名
+        class_buf = ctypes.create_unicode_buffer(256)
+        user32.GetClassNameW(hwnd, class_buf, 256)
+        class_name = class_buf.value
+
+        # 进程名
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        process_name = ""
+
+        if pid.value:
+            PROCESS_QUERY_INFORMATION = 0x0400
+            PROCESS_VM_READ = 0x0010
+            access = PROCESS_QUERY_INFORMATION | PROCESS_VM_READ
+            process_handle = kernel32.OpenProcess(access, False, pid.value)
+            if process_handle:
+                try:
+                    exe_buf = ctypes.create_unicode_buffer(260)
+                    if psapi.GetModuleBaseNameW(process_handle, None, exe_buf, 260):
+                        process_name = exe_buf.value
+                finally:
+                    kernel32.CloseHandle(process_handle)
+
+        app_name = _guess_app_name(title, class_name, process_name)
+
+        return {
+            'title': title,
+            'class_name': class_name,
+            'process_name': process_name,
+            'app_name': app_name
+        }
     except Exception:
         return {}
 

@@ -251,6 +251,8 @@ my_files = [
     'hot-server.txt',
     'hot-rectify.txt',
     'hot-rule.txt',
+    'resources/assets/sounds/dictation-start.wav',
+    'resources/assets/sounds/dictation-stop.wav',
     'readme.md'
 ]
 my_folders = []     # 这里是要复制的文件夹

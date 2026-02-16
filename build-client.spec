@@ -176,6 +176,8 @@ my_files = [
     'hot-server.txt',
     'hot-rule.txt',
     'hot-rectify.txt',
+    'resources/assets/sounds/dictation-start.wav',
+    'resources/assets/sounds/dictation-stop.wav',
     'readme.md'
 ]
 my_folders = []     # 使用软链接，不再复制

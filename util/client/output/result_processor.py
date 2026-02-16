@@ -327,11 +327,22 @@ class ResultProcessor:
         # 窗口兼容性检测
         paste = Config.paste
         window_info = get_active_window_info()
+        if window_info:
+            logger.debug(
+                "前台窗口: title=%s class=%s process=%s app=%s",
+                window_info.get("title", ""),
+                window_info.get("class_name", ""),
+                window_info.get("process_name", ""),
+                window_info.get("app_name", ""),
+            )
+        else:
+            logger.debug("前台窗口检测为空，沿用默认输出模式")
 
         should_force_paste, matched_keyword = _should_force_paste(window_info)
         if should_force_paste:
             paste = True
             logger.debug(f"检测到兼容性应用关键词: {matched_keyword}，使用粘贴模式")
+        logger.debug("本次输出模式: %s", "paste" if paste else "type")
 
         # LLM 处理和输出
         llm_result = None

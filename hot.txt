@@ -7,3 +7,4 @@
 我家鸽鸽
 codex
 dir
+status

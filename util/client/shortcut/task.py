@@ -11,6 +11,7 @@ from threading import Event
 from typing import TYPE_CHECKING, Optional
 
 from . import logger
+from util.client.audio.cue_player import play_dictation_start, play_dictation_stop
 from util.tools.my_status import Status
 
 if TYPE_CHECKING:
@@ -66,6 +67,7 @@ class ShortcutTask:
     def launch(self) -> None:
         """启动录音任务"""
         logger.info(f"[{self.shortcut.key}] 触发：开始录音")
+        play_dictation_start()
 
         # 记录开始时间
         self.recording_start_time = time.time()
@@ -93,6 +95,7 @@ class ShortcutTask:
     def cancel(self) -> None:
         """取消录音任务（时间过短）"""
         logger.debug(f"[{self.shortcut.key}] 取消录音任务（时间过短）")
+        play_dictation_stop()
 
         self.is_recording = False
         self.state.stop_recording()
@@ -104,6 +107,7 @@ class ShortcutTask:
     def finish(self) -> None:
         """完成录音任务"""
         logger.info(f"[{self.shortcut.key}] 释放：完成录音")
+        play_dictation_stop()
 
         self.is_recording = False
         self.state.stop_recording()

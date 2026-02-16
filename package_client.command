@@ -8,6 +8,10 @@ CMD_FILE="start_client.command"
 DEFAULT_CONFIG="config_client.local.json"
 CONFIG_FILE="${1:-$DEFAULT_CONFIG}"
 REQUIRED_CLIENT_FILES=("hot.txt" "hot-rule.txt")
+REQUIRED_CLIENT_ASSETS=(
+  "resources/assets/sounds/dictation-start.wav"
+  "resources/assets/sounds/dictation-stop.wav"
+)
 
 RELEASE_DIR="release"
 STAMP="$(date +%Y%m%d-%H%M%S)"
@@ -55,6 +59,13 @@ for f in "${REQUIRED_CLIENT_FILES[@]}"; do
   fi
 done
 
+for f in "${REQUIRED_CLIENT_ASSETS[@]}"; do
+  if [[ ! -f "$f" ]]; then
+    echo "[ERROR] Missing required client asset: $f"
+    exit 1
+  fi
+done
+
 mkdir -p "$RELEASE_DIR"
 rm -rf "$STAGE_DIR" "$ZIP_PATH"
 mkdir -p "$STAGE_DIR"
@@ -67,6 +78,11 @@ chmod +x "$STAGE_DIR/$CMD_FILE"
 cp "$CONFIG_FILE" "$STAGE_DIR/$DEFAULT_CONFIG"
 
 for f in "${REQUIRED_CLIENT_FILES[@]}"; do
+  cp "$f" "$STAGE_DIR/$f"
+done
+
+for f in "${REQUIRED_CLIENT_ASSETS[@]}"; do
+  mkdir -p "$STAGE_DIR/$(dirname "$f")"
   cp "$f" "$STAGE_DIR/$f"
 done
 

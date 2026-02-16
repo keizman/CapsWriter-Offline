@@ -4,7 +4,7 @@
 # 每行一个热词，井号开头的行为注释，会被忽略
 # 使用音素 RAG 匹配，支持中英文混合
 
-
+status
 dir
 # ==================== 中文热词 ====================
 我家鸽鸽
@@ -75,6 +75,11 @@ int8
 fp16
 fp32
 Antigravity
+gguf
+onnx
+pytorch
+TTS
+safetensors
 
 
 #IDE
