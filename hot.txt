@@ -10,3 +10,6 @@ dir
 status
 commit
 Mac
+wireshark
+client 端
+conda

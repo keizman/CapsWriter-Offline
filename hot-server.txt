@@ -7,6 +7,9 @@
 status
 dir
 commit
+wireshark
+client 端
+conda
 # ==================== 中文热词 ====================
 我家鸽鸽
 如臂使指

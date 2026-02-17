@@ -44,6 +44,13 @@ class AudioStreamManager:
     
     SAMPLE_RATE = 48000
     BLOCK_DURATION = 0.05  # 50ms
+    VIS_RMS_FLOOR_INIT = 3e-4
+    VIS_RMS_PEAK_INIT = 2e-3
+    VIS_FLOOR_FOLLOW_DOWN = 0.12
+    VIS_FLOOR_FOLLOW_UP = 0.01
+    VIS_PEAK_DECAY = 0.012
+    VIS_GAMMA = 0.50
+    VIS_MIN_ACTIVE_LEVEL = 0.22
     
     def __init__(self, state: 'ClientState'):
         """
@@ -55,6 +62,9 @@ class AudioStreamManager:
         self.state = state
         self._channels = 1
         self._running = False  # 标志是否应该运行
+        self._visual_level = 0.0
+        self._rms_floor = self.VIS_RMS_FLOOR_INIT
+        self._rms_peak = self.VIS_RMS_PEAK_INIT
     
     def _audio_callback(
         self,
@@ -74,10 +84,35 @@ class AudioStreamManager:
 
         # 更新 Flow Bar 音量级别（0~1）
         try:
-            # 使用 RMS 估算语音强度，压缩并限制到可视化范围
+            # 自适应 AGC：动态跟随噪声底与说话峰值，提升中小音量可视化反馈。
             rms = float(np.sqrt(np.mean(np.square(indata))))
-            level = min(1.0, max(0.0, rms * 7.5))
-            set_flow_audio_level(level)
+            rms = max(0.0, rms)
+
+            if rms < self._rms_floor:
+                self._rms_floor += (rms - self._rms_floor) * self.VIS_FLOOR_FOLLOW_DOWN
+            else:
+                self._rms_floor += (rms - self._rms_floor) * self.VIS_FLOOR_FOLLOW_UP
+
+            self._rms_floor = max(5e-5, self._rms_floor)
+
+            self._rms_peak = max(rms, self._rms_peak * (1.0 - self.VIS_PEAK_DECAY))
+            if self._rms_peak < self._rms_floor * 1.6:
+                self._rms_peak = self._rms_floor * 1.6
+
+            dynamic_range = max(2e-4, self._rms_peak - self._rms_floor)
+            norm = (rms - self._rms_floor) / dynamic_range
+            norm = min(1.0, max(0.0, norm))
+            target_level = float(norm ** self.VIS_GAMMA)
+
+            if target_level > 0.0:
+                target_level = max(target_level, self.VIS_MIN_ACTIVE_LEVEL)
+            else:
+                target_level = 0.0
+
+            # 上升快、下降慢，避免跳动且保证有输入时反馈及时
+            smooth = 0.58 if target_level > self._visual_level else 0.14
+            self._visual_level += (target_level - self._visual_level) * smooth
+            set_flow_audio_level(self._visual_level)
         except Exception:
             pass
 

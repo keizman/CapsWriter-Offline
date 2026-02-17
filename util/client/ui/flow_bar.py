@@ -63,8 +63,8 @@ _MACOS_DOCK_MIN_INSET = 44
 _MACOS_DOCK_MAX_INSET = 220
 _MACOS_DOCK_AUTOHIDE_INSET = 10
 
-_AUDIO_NOISE_FLOOR = 0.22
-_AUDIO_VISUAL_SMOOTH = 0.18
+_AUDIO_NOISE_FLOOR = 0.04
+_AUDIO_VISUAL_SMOOTH = 0.24
 
 _BAR_COUNT = 10
 _BAR_ENVELOPE_SILENT = [0.08, 0.11, 0.14, 0.18, 0.23, 0.23, 0.18, 0.14, 0.11, 0.08]
@@ -535,7 +535,12 @@ class _FlowBarIndicator:
         start_x = (w - total) / 2.0
         cy = h / 2.0
 
-        audio_activity = max(0.0, min(1.0, (self._audio_visual_level - _AUDIO_NOISE_FLOOR) / (1.0 - _AUDIO_NOISE_FLOOR)))
+        audio_activity_raw = max(
+            0.0,
+            min(1.0, (self._audio_visual_level - _AUDIO_NOISE_FLOOR) / (1.0 - _AUDIO_NOISE_FLOOR))
+        )
+        # 提升低电平区段灵敏度，让轻声输入更容易进入“有声”波动
+        audio_activity = audio_activity_raw ** 0.62
 
         for i in range(bars):
             px = self._phase + i * 0.62
@@ -546,7 +551,7 @@ class _FlowBarIndicator:
                 silent_scale = _BAR_ENVELOPE_SILENT[i] + silent_wave
 
                 # 有声录音态：保持原有显著波幅，并用音量放大。
-                audio_amp = 0.30 + 0.70 * self._audio_visual_level
+                audio_amp = 0.36 + 0.82 * self._audio_visual_level
                 audio_scale = 0.28 + audio_amp * wave
 
                 # 根据音频活动度在 silent/audio 两种样式间平滑过渡。
