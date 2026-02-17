@@ -18,6 +18,7 @@ import asyncio
 import math
 import platform
 import queue
+import subprocess
 import threading
 from dataclasses import dataclass
 
@@ -57,6 +58,10 @@ _MAX_UI_SCALE = 2.2
 _DEFAULT_BG_COLOR = "#101214"
 _WINDOWS_TRANSPARENT_KEY = "#00ff00"
 
+_MACOS_DOCK_MIN_INSET = 44
+_MACOS_DOCK_MAX_INSET = 220
+_MACOS_DOCK_AUTOHIDE_INSET = 10
+
 
 class _FlowBarIndicator:
     def __init__(self) -> None:
@@ -75,6 +80,7 @@ class _FlowBarIndicator:
         self._ui_scale = 1.0
         self._window_bg_color = _DEFAULT_BG_COLOR
         self._frame_count = 0
+        self._macos_dock_bottom_inset = 0
 
         self._running = False
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -177,6 +183,8 @@ class _FlowBarIndicator:
                     canvas.configure(bg=self._window_bg_color)
 
             self._refresh_ui_scale(reset_current=True)
+            if platform.system() == "Darwin":
+                self._macos_dock_bottom_inset = self._detect_macos_dock_bottom_inset()
             try:
                 root.deiconify()
             except Exception:
@@ -232,6 +240,8 @@ class _FlowBarIndicator:
                 self._frame_count += 1
                 if self._frame_count % 60 == 0:
                     self._refresh_ui_scale(reset_current=False)
+                if platform.system() == "Darwin" and self._frame_count % 180 == 0:
+                    self._macos_dock_bottom_inset = self._detect_macos_dock_bottom_inset()
 
                 self._enforce_borderless()
                 self._apply_geometry()
@@ -325,10 +335,71 @@ class _FlowBarIndicator:
         x = int(left + (usable_w - width) / 2)
         bottom_padding = int(_FLOW_BAR_BOTTOM_PADDING * self._ui_scale)
         edge_padding = int(_FLOW_BAR_EDGE_PADDING * self._ui_scale)
-        y = int(bottom - bottom_padding - height)
+        platform_bottom_inset = self._get_platform_bottom_inset(bottom)
+        y = int(bottom - bottom_padding - height - platform_bottom_inset)
         if y < top + edge_padding:
             y = top + edge_padding
         self._root.geometry(f"{width}x{height}+{x}+{y}")
+
+    def _get_platform_bottom_inset(self, usable_bottom: int) -> int:
+        if platform.system() != "Darwin" or not self._root:
+            return 0
+
+        # 若工作区已排除 Dock（usable_bottom < screen_h），不再重复抬高。
+        try:
+            screen_h = int(self._root.winfo_screenheight())
+        except Exception:
+            screen_h = usable_bottom
+        if usable_bottom < screen_h - 2:
+            return 0
+        return max(0, int(self._macos_dock_bottom_inset))
+
+    def _read_macos_dock_pref(self, key: str) -> str:
+        try:
+            result = subprocess.run(
+                ["defaults", "read", "com.apple.dock", key],
+                capture_output=True,
+                text=True,
+                timeout=0.3,
+                check=False,
+            )
+            if result.returncode != 0:
+                return ""
+            return result.stdout.strip()
+        except Exception:
+            return ""
+
+    def _detect_macos_dock_bottom_inset(self) -> int:
+        if platform.system() != "Darwin":
+            return 0
+
+        orientation = self._read_macos_dock_pref("orientation").lower()
+        if orientation and orientation != "bottom":
+            return 0
+
+        autohide_raw = self._read_macos_dock_pref("autohide").lower()
+        autohide = autohide_raw in {"1", "true", "yes"}
+        if autohide:
+            return int(max(_MACOS_DOCK_AUTOHIDE_INSET, _MACOS_DOCK_AUTOHIDE_INSET * self._ui_scale))
+
+        magnification_raw = self._read_macos_dock_pref("magnification").lower()
+        magnification = magnification_raw in {"1", "true", "yes"}
+
+        def _to_int(text: str, fallback: int) -> int:
+            try:
+                return int(float(text))
+            except Exception:
+                return fallback
+
+        tile_size = _to_int(self._read_macos_dock_pref("tilesize"), 48)
+        large_size = _to_int(self._read_macos_dock_pref("largesize"), tile_size)
+        dock_size = large_size if magnification and large_size > 0 else tile_size
+        estimated = dock_size + 24
+
+        # 下限与上限保护，避免配置异常导致偏移过大/过小。
+        min_inset = int(_MACOS_DOCK_MIN_INSET * self._ui_scale)
+        max_inset = int(_MACOS_DOCK_MAX_INSET * self._ui_scale)
+        return max(min_inset, min(estimated, max_inset))
 
     def _get_usable_screen_rect(self) -> tuple[int, int, int, int]:
         if not self._root:

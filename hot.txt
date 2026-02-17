@@ -9,3 +9,4 @@ codex
 dir
 status
 commit
+Mac

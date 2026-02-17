@@ -14,6 +14,8 @@ CapsWriter Offline Client 入口模块
 from __future__ import annotations
 
 import asyncio
+import ctypes
+import ctypes.util
 import os
 import sys
 from pathlib import Path
@@ -99,7 +101,7 @@ _main_task = None  # 主任务引用
 
 def _check_macos_permissions() -> None:
     """检查 MacOS 权限设置"""
-    if system() == 'Darwin' and not sys.argv[1:]:
+    if system() == 'Darwin':
         # macOS 不需要 sudo；关键是系统权限授权（辅助功能、输入监控、麦克风）
         if os.getuid() == 0:
             logger.warning("检测到以 root 启动。macOS 客户端通常不需要 sudo。")
@@ -108,6 +110,64 @@ def _check_macos_permissions() -> None:
                 "macOS 使用提示：请在“系统设置 -> 隐私与安全性”中授予本程序 "
                 "“辅助功能 / 输入监控 / 麦克风”权限。"
             )
+            print(
+                "\n[Permission Hint] macOS 首次使用请授予 CapsWriter-Client.app（或 Terminal/iTerm）"
+                " 的“辅助功能 / 输入监控 / 麦克风”权限。若出现 "
+                "\"This process is not trusted\"，请授权后重启客户端。\n",
+                file=sys.stderr,
+                flush=True,
+            )
+
+        trust_state = _get_macos_input_trust_state()
+        if trust_state is False:
+            message = (
+                "检测到当前进程未获得全局输入权限，快捷键监听可能无法生效。"
+                "请到“系统设置 -> 隐私与安全性 -> 辅助功能 / 输入监控”，"
+                "允许 CapsWriter-Client.app（或 Terminal/iTerm）后重启客户端。"
+            )
+            logger.error(message)
+            print(f"\n[Permission Required] {message}\n", file=sys.stderr, flush=True)
+        elif trust_state is None:
+            logger.warning("无法确认 macOS 输入权限状态，请手动检查“辅助功能 / 输入监控”授权。")
+
+
+def _get_macos_input_trust_state() -> bool | None:
+    """
+    检测 macOS 全局输入权限状态。
+
+    Returns:
+        True: 已授权
+        False: 未授权
+        None: 无法检测（系统接口不可用）
+    """
+    if system() != 'Darwin':
+        return True
+
+    try:
+        lib_path = ctypes.util.find_library("ApplicationServices")
+        if not lib_path:
+            return None
+        app_services = ctypes.cdll.LoadLibrary(lib_path)
+
+        # macOS 10.15+：输入监控权限（监听全局输入事件）
+        preflight_input_fn = getattr(app_services, "CGPreflightListenEventAccess", None)
+        if preflight_input_fn is not None:
+            preflight_input_fn.restype = ctypes.c_bool
+            try:
+                if not bool(preflight_input_fn()):
+                    return False
+            except Exception:
+                # 无法调用时继续回退到 AX 检查
+                pass
+
+        # 辅助功能权限（Accessibility）
+        is_trusted_fn = getattr(app_services, "AXIsProcessTrusted", None)
+        if is_trusted_fn is None:
+            return None
+        is_trusted_fn.restype = ctypes.c_bool
+        return bool(is_trusted_fn())
+    except Exception:
+        return None
 
 
 async def main_mic() -> None:

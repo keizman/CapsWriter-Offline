@@ -109,6 +109,7 @@ Pro
 iCloud
 Siri
 Hey Siri
+Mac
 
 Samsung
 Android
