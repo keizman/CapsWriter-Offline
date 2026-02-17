@@ -49,6 +49,14 @@ _STATE_ALPHAS = {
 _FLOW_BAR_BOTTOM_PADDING = 24
 _FLOW_BAR_EDGE_PADDING = 8
 
+_BASE_SCREEN_WIDTH = 1920.0
+_BASE_SCREEN_HEIGHT = 1080.0
+_MIN_UI_SCALE = 1.0
+_MAX_UI_SCALE = 2.2
+
+_DEFAULT_BG_COLOR = "#101214"
+_WINDOWS_TRANSPARENT_KEY = "#00ff00"
+
 
 class _FlowBarIndicator:
     def __init__(self) -> None:
@@ -64,6 +72,9 @@ class _FlowBarIndicator:
         self._target_height = style.height
         self._current_alpha = _STATE_ALPHAS[_STATE_RESTING]
         self._target_alpha = _STATE_ALPHAS[_STATE_RESTING]
+        self._ui_scale = 1.0
+        self._window_bg_color = _DEFAULT_BG_COLOR
+        self._frame_count = 0
 
         self._running = False
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -133,7 +144,12 @@ class _FlowBarIndicator:
                 root.wm_overrideredirect(True)
             except Exception:
                 pass
-            self._set_window_alpha(self._current_alpha)
+            try:
+                root.attributes("-alpha", self._current_alpha)
+            except Exception:
+                pass
+
+            self._window_bg_color = _WINDOWS_TRANSPARENT_KEY if platform.system() == "Windows" else _DEFAULT_BG_COLOR
 
             if platform.system() == "Darwin":
                 # macOS: 强制无标题栏样式，隐藏红黄绿按钮
@@ -147,10 +163,20 @@ class _FlowBarIndicator:
                 except Exception:
                     pass
 
-            bg = "#101214"
+            bg = self._window_bg_color
             root.configure(bg=bg)
             canvas = tk.Canvas(root, highlightthickness=0, bd=0, bg=bg)
             canvas.pack(fill=tk.BOTH, expand=True)
+            if platform.system() == "Windows":
+                try:
+                    # 仅显示胶囊形主体，隐藏矩形窗口底板
+                    root.wm_attributes("-transparentcolor", bg)
+                except Exception:
+                    self._window_bg_color = _DEFAULT_BG_COLOR
+                    root.configure(bg=self._window_bg_color)
+                    canvas.configure(bg=self._window_bg_color)
+
+            self._refresh_ui_scale(reset_current=True)
             try:
                 root.deiconify()
             except Exception:
@@ -203,6 +229,9 @@ class _FlowBarIndicator:
                 self._current_height += (self._target_height - self._current_height) * 0.28
                 self._current_alpha += (self._target_alpha - self._current_alpha) * 0.28
                 self._phase += 0.34
+                self._frame_count += 1
+                if self._frame_count % 60 == 0:
+                    self._refresh_ui_scale(reset_current=False)
 
                 self._enforce_borderless()
                 self._apply_geometry()
@@ -231,7 +260,7 @@ class _FlowBarIndicator:
 
             if cmd == "state":
                 self._state = str(payload)
-                style = _STYLES.get(self._state, _STYLES[_STATE_RESTING])
+                style = self._style_for_state(self._state)
                 self._target_width = style.width
                 self._target_height = style.height
                 self._target_alpha = _STATE_ALPHAS.get(self._state, _STATE_ALPHAS[_STATE_RESTING])
@@ -242,6 +271,50 @@ class _FlowBarIndicator:
 
         return False
 
+    def _style_for_state(self, state: str) -> _FlowStyle:
+        base = _STYLES.get(state, _STYLES[_STATE_RESTING])
+        scale = max(_MIN_UI_SCALE, min(_MAX_UI_SCALE, float(self._ui_scale)))
+        return _FlowStyle(
+            width=base.width * scale,
+            height=base.height * scale,
+        )
+
+    def _refresh_ui_scale(self, reset_current: bool = False) -> None:
+        if not self._root:
+            return
+        self._ui_scale = self._detect_ui_scale()
+        style = self._style_for_state(self._state)
+        self._target_width = style.width
+        self._target_height = style.height
+        if reset_current:
+            self._current_width = style.width
+            self._current_height = style.height
+
+    def _detect_ui_scale(self) -> float:
+        if not self._root:
+            return 1.0
+
+        try:
+            screen_w = float(self._root.winfo_screenwidth())
+            screen_h = float(self._root.winfo_screenheight())
+        except Exception:
+            screen_w = _BASE_SCREEN_WIDTH
+            screen_h = _BASE_SCREEN_HEIGHT
+
+        resolution_scale = min(screen_w / _BASE_SCREEN_WIDTH, screen_h / _BASE_SCREEN_HEIGHT)
+        resolution_scale = max(1.0, resolution_scale)
+
+        dpi_scale = 1.0
+        try:
+            pixels_per_inch = float(self._root.winfo_fpixels("1i"))
+            if pixels_per_inch > 0:
+                dpi_scale = pixels_per_inch / 96.0
+        except Exception:
+            pass
+
+        final_scale = max(resolution_scale, dpi_scale, 1.0)
+        return max(_MIN_UI_SCALE, min(_MAX_UI_SCALE, final_scale))
+
     def _apply_geometry(self) -> None:
         if not self._root:
             return
@@ -250,9 +323,11 @@ class _FlowBarIndicator:
         left, top, right, bottom = self._get_usable_screen_rect()
         usable_w = max(1, right - left)
         x = int(left + (usable_w - width) / 2)
-        y = int(bottom - _FLOW_BAR_BOTTOM_PADDING - height)
-        if y < top + _FLOW_BAR_EDGE_PADDING:
-            y = top + _FLOW_BAR_EDGE_PADDING
+        bottom_padding = int(_FLOW_BAR_BOTTOM_PADDING * self._ui_scale)
+        edge_padding = int(_FLOW_BAR_EDGE_PADDING * self._ui_scale)
+        y = int(bottom - bottom_padding - height)
+        if y < top + edge_padding:
+            y = top + edge_padding
         self._root.geometry(f"{width}x{height}+{x}+{y}")
 
     def _get_usable_screen_rect(self) -> tuple[int, int, int, int]:
@@ -339,7 +414,7 @@ class _FlowBarIndicator:
         self._canvas.delete("all")
         w = max(16.0, self._current_width)
         h = max(8.0, self._current_height)
-        r = min(h / 2.0, 12.0)
+        r = h / 2.0
 
         fill = "#15181b"
         if self._state == _STATE_RESTING:
