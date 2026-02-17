@@ -173,6 +173,13 @@ class ClientConfig:
                 'enabled': True         # 启用此快捷键
             },
             {
+                'key': 'ctrl_r',        # 右 Ctrl 长按说话
+                'type': 'keyboard',
+                'suppress': False,
+                'hold_mode': True,
+                'enabled': True
+            },
+            {
                 'key': 'x2',
                 'type': 'mouse',
                 'suppress': True,
@@ -191,6 +198,13 @@ class ClientConfig:
             },
             {
                 'key': 'caps_lock',     # 保留原始按键支持
+                'type': 'keyboard',
+                'suppress': False,
+                'hold_mode': True,
+                'enabled': True
+            },
+            {
+                'key': 'ctrl_r',        # 右 Ctrl 长按说话
                 'type': 'keyboard',
                 'suppress': False,
                 'hold_mode': True,

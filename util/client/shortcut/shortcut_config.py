@@ -93,6 +93,7 @@ class Shortcut:
             'command': 'cmd',
             'right command': 'cmd_r',
             'left command': 'cmd',
+            'rctrl': 'ctrl_r',
             'right ctrl': 'ctrl_r',
             'left ctrl': 'ctrl',
             'right shift': 'shift_r',
