@@ -57,10 +57,17 @@ _MAX_UI_SCALE = 2.2
 
 _DEFAULT_BG_COLOR = "#101214"
 _WINDOWS_TRANSPARENT_KEY = "#00ff00"
+_MACOS_TRANSPARENT_BG = "systemTransparent"
 
 _MACOS_DOCK_MIN_INSET = 44
 _MACOS_DOCK_MAX_INSET = 220
 _MACOS_DOCK_AUTOHIDE_INSET = 10
+
+_AUDIO_NOISE_FLOOR = 0.22
+_AUDIO_VISUAL_SMOOTH = 0.18
+
+_BAR_COUNT = 10
+_BAR_ENVELOPE_SILENT = [0.08, 0.11, 0.14, 0.18, 0.23, 0.23, 0.18, 0.14, 0.11, 0.08]
 
 
 class _FlowBarIndicator:
@@ -68,6 +75,7 @@ class _FlowBarIndicator:
         self._commands: "queue.Queue[tuple[str, object]]" = queue.Queue()
         self._state = _STATE_RESTING
         self._audio_level = 0.0
+        self._audio_visual_level = 0.0
         self._phase = 0.0
 
         style = _STYLES[_STATE_RESTING]
@@ -79,6 +87,7 @@ class _FlowBarIndicator:
         self._target_alpha = _STATE_ALPHAS[_STATE_RESTING]
         self._ui_scale = 1.0
         self._window_bg_color = _DEFAULT_BG_COLOR
+        self._macos_transparent_bg_enabled = False
         self._frame_count = 0
         self._macos_dock_bottom_inset = 0
 
@@ -160,19 +169,29 @@ class _FlowBarIndicator:
             if platform.system() == "Darwin":
                 # macOS: 强制无标题栏样式，隐藏红黄绿按钮
                 try:
-                    root.tk.call("::tk::unsupported::MacWindowStyle", "style", root._w, "help", "none")
-                except Exception:
-                    pass
-                # 备用样式，部分 Tk 版本对 help 样式不稳定
-                try:
                     root.tk.call("::tk::unsupported::MacWindowStyle", "style", root._w, "floating", "none")
                 except Exception:
                     pass
+                try:
+                    root.tk.call("::tk::unsupported::MacWindowStyle", "style", root._w, "plain", "none")
+                except Exception:
+                    pass
 
-            bg = self._window_bg_color
+            if platform.system() == "Darwin":
+                bg = _MACOS_TRANSPARENT_BG
+            else:
+                bg = self._window_bg_color
             root.configure(bg=bg)
             canvas = tk.Canvas(root, highlightthickness=0, bd=0, bg=bg)
             canvas.pack(fill=tk.BOTH, expand=True)
+            if platform.system() == "Darwin":
+                try:
+                    root.wm_attributes("-transparent", True)
+                    self._macos_transparent_bg_enabled = True
+                except Exception:
+                    self._macos_transparent_bg_enabled = False
+                    root.configure(bg=_DEFAULT_BG_COLOR)
+                    canvas.configure(bg=_DEFAULT_BG_COLOR)
             if platform.system() == "Windows":
                 try:
                     # 仅显示胶囊形主体，隐藏矩形窗口底板
@@ -236,6 +255,7 @@ class _FlowBarIndicator:
                 self._current_width += (self._target_width - self._current_width) * 0.28
                 self._current_height += (self._target_height - self._current_height) * 0.28
                 self._current_alpha += (self._target_alpha - self._current_alpha) * 0.28
+                self._audio_visual_level += (self._audio_level - self._audio_visual_level) * _AUDIO_VISUAL_SMOOTH
                 self._phase += 0.34
                 self._frame_count += 1
                 if self._frame_count % 60 == 0:
@@ -276,6 +296,7 @@ class _FlowBarIndicator:
                 self._target_alpha = _STATE_ALPHAS.get(self._state, _STATE_ALPHAS[_STATE_RESTING])
                 if self._state == _STATE_RESTING:
                     self._audio_level = 0.0
+                    self._audio_visual_level = 0.0
             elif cmd == "audio":
                 self._audio_level = float(payload)
 
@@ -466,7 +487,11 @@ class _FlowBarIndicator:
             pass
         if platform.system() == "Darwin":
             try:
-                self._root.tk.call("::tk::unsupported::MacWindowStyle", "style", self._root._w, "help", "none")
+                self._root.tk.call("::tk::unsupported::MacWindowStyle", "style", self._root._w, "floating", "none")
+            except Exception:
+                pass
+            try:
+                self._root.tk.call("::tk::unsupported::MacWindowStyle", "style", self._root._w, "plain", "none")
             except Exception:
                 pass
 
@@ -493,41 +518,54 @@ class _FlowBarIndicator:
         elif self._state == _STATE_PROCESSING:
             fill = "#1a1f25"
 
-        # 无描边胶囊，避免左右出现“透明圆环”视觉。
-        x1 = max(0.0, r - 1.0)
-        x2 = min(w, max(r, w - r) + 1.0)
-        self._canvas.create_rectangle(
-            x1,
-            0,
-            x2,
-            h,
-            fill=fill,
-            outline="",
-        )
-        self._canvas.create_oval(0, 0, 2 * r, h, fill=fill, outline="")
-        self._canvas.create_oval(max(0, w - 2 * r), 0, w, h, fill=fill, outline="")
+        # 用圆头线段绘制胶囊背景，边缘更圆滑。
+        cy = h / 2.0
+        x1 = max(r, 0.0)
+        x2 = max(x1, w - r)
+        self._canvas.create_line(x1, cy, x2, cy, fill=fill, width=h, capstyle="round")
 
         if self._state == _STATE_RESTING:
             return
 
-        bars = 10
-        bar_w = max(2.0, (w * 0.42) / bars)
-        gap = bar_w * 0.55
+        bars = _BAR_COUNT
+        base_bar_w = max(2.0, (w * 0.42) / bars)
+        bar_w = max(1.2, base_bar_w * 0.8)
+        gap = base_bar_w * 0.55
         total = bars * bar_w + (bars - 1) * gap
         start_x = (w - total) / 2.0
         cy = h / 2.0
+
+        audio_activity = max(0.0, min(1.0, (self._audio_visual_level - _AUDIO_NOISE_FLOOR) / (1.0 - _AUDIO_NOISE_FLOOR)))
 
         for i in range(bars):
             px = self._phase + i * 0.62
             wave = abs(math.sin(px))
             if self._state == _STATE_ACTIVE_PTT:
-                amp = 0.25 + 0.75 * self._audio_level
-                scale = 0.35 + amp * wave
+                # 无声录音态：中心更高，仅轻微律动。
+                silent_wave = 0.02 * abs(math.sin(self._phase * 0.68 + i * 0.50))
+                silent_scale = _BAR_ENVELOPE_SILENT[i] + silent_wave
+
+                # 有声录音态：保持原有显著波幅，并用音量放大。
+                audio_amp = 0.30 + 0.70 * self._audio_visual_level
+                audio_scale = 0.28 + audio_amp * wave
+
+                # 根据音频活动度在 silent/audio 两种样式间平滑过渡。
+                scale = silent_scale * (1.0 - audio_activity) + audio_scale * audio_activity
             else:
                 scale = 0.35 + 0.55 * wave
 
-            max_bar_h = h * 0.62
-            min_bar_h = max(2.0, h * 0.16)
+            scale = max(0.0, min(1.0, scale))
+            if self._state == _STATE_ACTIVE_PTT:
+                # 无音时接近“....”小点；检测到语音后逐步恢复到长柱波动。
+                silent_min_bar_h = max(1.0, h * 0.05)
+                silent_max_bar_h = max(2.0, h * 0.24)
+                audio_min_bar_h = max(2.0, h * 0.16)
+                audio_max_bar_h = h * 0.62
+                min_bar_h = silent_min_bar_h * (1.0 - audio_activity) + audio_min_bar_h * audio_activity
+                max_bar_h = silent_max_bar_h * (1.0 - audio_activity) + audio_max_bar_h * audio_activity
+            else:
+                max_bar_h = h * 0.62
+                min_bar_h = max(2.0, h * 0.16)
             bar_h = min_bar_h + (max_bar_h - min_bar_h) * scale
             x1 = start_x + i * (bar_w + gap)
             x2 = x1 + bar_w
