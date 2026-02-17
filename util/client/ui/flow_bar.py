@@ -46,6 +46,9 @@ _STATE_ALPHAS = {
     _STATE_PROCESSING: 0.86,
 }
 
+_FLOW_BAR_BOTTOM_PADDING = 24
+_FLOW_BAR_EDGE_PADDING = 8
+
 
 class _FlowBarIndicator:
     def __init__(self) -> None:
@@ -244,11 +247,65 @@ class _FlowBarIndicator:
             return
         width = max(16, int(self._current_width))
         height = max(8, int(self._current_height))
-        screen_w = self._root.winfo_screenwidth()
-        screen_h = self._root.winfo_screenheight()
-        x = int((screen_w - width) / 2)
-        y = int(screen_h - 120 - height)
+        left, top, right, bottom = self._get_usable_screen_rect()
+        usable_w = max(1, right - left)
+        x = int(left + (usable_w - width) / 2)
+        y = int(bottom - _FLOW_BAR_BOTTOM_PADDING - height)
+        if y < top + _FLOW_BAR_EDGE_PADDING:
+            y = top + _FLOW_BAR_EDGE_PADDING
         self._root.geometry(f"{width}x{height}+{x}+{y}")
+
+    def _get_usable_screen_rect(self) -> tuple[int, int, int, int]:
+        if not self._root:
+            return (0, 0, 1920, 1080)
+
+        # 默认使用整屏尺寸
+        left = 0
+        top = 0
+        right = int(self._root.winfo_screenwidth())
+        bottom = int(self._root.winfo_screenheight())
+
+        # 优先尝试 Tk 的虚拟根工作区（部分平台会排除任务栏/Dock）
+        try:
+            v_left = int(self._root.winfo_vrootx())
+            v_top = int(self._root.winfo_vrooty())
+            v_width = int(self._root.winfo_vrootwidth())
+            v_height = int(self._root.winfo_vrootheight())
+            if v_width > 0 and v_height > 0:
+                left = v_left
+                top = v_top
+                right = v_left + v_width
+                bottom = v_top + v_height
+        except Exception:
+            pass
+
+        # Windows 使用系统工作区，精确避开任务栏（含置顶/高任务栏）
+        if platform.system() == "Windows":
+            try:
+                import ctypes
+
+                class _Rect(ctypes.Structure):
+                    _fields_ = [
+                        ("left", ctypes.c_long),
+                        ("top", ctypes.c_long),
+                        ("right", ctypes.c_long),
+                        ("bottom", ctypes.c_long),
+                    ]
+
+                rect = _Rect()
+                SPI_GETWORKAREA = 0x0030
+                ok = ctypes.windll.user32.SystemParametersInfoW(
+                    SPI_GETWORKAREA, 0, ctypes.byref(rect), 0
+                )
+                if ok:
+                    left = int(rect.left)
+                    top = int(rect.top)
+                    right = int(rect.right)
+                    bottom = int(rect.bottom)
+            except Exception:
+                pass
+
+        return left, top, right, bottom
 
     def _enforce_borderless(self) -> None:
         if not self._root:
