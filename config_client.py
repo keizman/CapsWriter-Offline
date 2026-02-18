@@ -269,6 +269,18 @@ class ClientConfig:
         default=0.02
     )
 
+    # Partial 输入模式（流式边说边上屏）
+    partial_input_enabled = _cfg_bool(
+        "CAPSWRITER_PARTIAL_INPUT_ENABLED",
+        "output", "partial_input_enabled",
+        default=False
+    )
+    partial_input_char_interval_ms = _cfg_int(
+        "CAPSWRITER_PARTIAL_INPUT_CHAR_INTERVAL_MS",
+        "output", "partial_input_char_interval_ms",
+        default=10
+    )
+
     paste        = not _IS_WINDOWS  # 非 Windows 默认使用粘贴，兼容性更好
     restore_clip = True         # 模拟粘贴后是否恢复剪贴板
 

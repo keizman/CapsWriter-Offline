@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
@@ -27,6 +28,12 @@ from util.client.state import get_state
 if TYPE_CHECKING:
     from util.client.state import ClientState
 
+
+@dataclass
+class PartialCommitState:
+    """单任务 partial 提交状态。"""
+    prev_partial: str = ""
+    committed_text: str = ""
 
 
 def _estimate_tokens(text: str) -> int:
@@ -90,6 +97,7 @@ class ResultProcessor:
         self._text_output = TextOutput()
         self._exit_event = asyncio.Event()
         self._loop = asyncio.get_running_loop()  # 保存事件循环引用
+        self._partial_states: dict[str, PartialCommitState] = {}
 
     def request_exit(self):
         """请求退出处理循环（线程安全）"""
@@ -102,6 +110,83 @@ class ResultProcessor:
         else:
             self._exit_event.set()
             logger.debug("已直接设置退出事件")
+
+    @staticmethod
+    def _lcp_len(a: str, b: str) -> int:
+        """返回两段文本的最长公共前缀长度。"""
+        n = min(len(a), len(b))
+        idx = 0
+        while idx < n and a[idx] == b[idx]:
+            idx += 1
+        return idx
+
+    async def _commit_partial_increment(
+        self,
+        state: PartialCommitState,
+        target_text: str,
+    ) -> None:
+        """
+        将 target_text 中相对已提交部分的增量输出到输入框。
+
+        partial 模式下只做追加，不回删。
+        """
+        if not target_text:
+            return
+
+        # 若目标前缀与已提交不一致，说明发生了前缀回改；为避免误删，跳过本轮。
+        if not target_text.startswith(state.committed_text):
+            common = self._lcp_len(state.committed_text, target_text)
+            if common < len(state.committed_text):
+                logger.debug(
+                    "partial 前缀回改，跳过增量提交: committed=%s target=%s",
+                    len(state.committed_text),
+                    len(target_text),
+                )
+                return
+
+        delta = target_text[len(state.committed_text):]
+        if not delta:
+            return
+
+        await self._text_output.output_streaming(
+            delta,
+            paste=False,  # partial 模式强制逐字打字，不走粘贴
+            char_interval_ms=int(Config.partial_input_char_interval_ms),
+        )
+        state.committed_text += delta
+        get_state().set_output_text(state.committed_text)
+
+    async def _handle_partial_input(self, message: dict) -> None:
+        """
+        处理 partial 输入模式（lag=1 block，逐字提交稳定增量）。
+        """
+        task_id = str(message.get("task_id", ""))
+        if not task_id:
+            return
+
+        current_text = str(message.get("text", "") or "")
+        state = self._partial_states.setdefault(task_id, PartialCommitState())
+
+        # 非 final：收到下一 block 时，提交上一 block 与当前 block 的稳定前缀（lag=1）
+        if not message.get("is_final", False):
+            if not state.prev_partial:
+                state.prev_partial = current_text
+                return
+
+            stable_len = self._lcp_len(state.prev_partial, current_text)
+            stable_text = current_text[:stable_len]
+            await self._commit_partial_increment(state, stable_text)
+            state.prev_partial = current_text
+            return
+
+        # final：先提交上一 block 的稳定前缀，再提交 final 剩余文本
+        if state.prev_partial:
+            stable_len = self._lcp_len(state.prev_partial, current_text)
+            stable_text = current_text[:stable_len]
+            await self._commit_partial_increment(state, stable_text)
+
+        await self._commit_partial_increment(state, current_text)
+        self._partial_states.pop(task_id, None)
     
     def _format_llm_result(self, llm_result) -> str:
         """格式化 LLM 结果输出"""
@@ -255,6 +340,7 @@ class ResultProcessor:
         text = message['text']
         original_text = text  # 保存原始识别结果
         delay = message['time_complete'] - message['time_submit']
+        partial_mode = bool(Config.partial_input_enabled)
 
         if message['is_final']:
             logger.info(f"收到最终识别结果: {text}, 时延: {delay:.2f}s")
@@ -264,8 +350,13 @@ class ResultProcessor:
                 f"时延: {delay:.2f}s"
             )
 
-        # 如果非最终结果，继续等待
-        if not message['is_final']:
+        # partial 输入模式：边说边上屏（lag=1），final 时不重复上屏。
+        if partial_mode:
+            await self._handle_partial_input(message)
+            if not message['is_final']:
+                return
+        elif not message['is_final']:
+            # 非 partial 模式下，继续沿用“只处理 final”。
             return
 
         # 繁体转换
@@ -347,7 +438,13 @@ class ResultProcessor:
 
         # LLM 处理和输出
         llm_result = None
-        if Config.llm_enabled:
+        if partial_mode:
+            # partial 模式已在流式阶段上屏，final 不再重复输出。
+            logger.debug("partial 输入模式：跳过 final 再次上屏")
+            if Config.llm_enabled:
+                logger.debug("partial 输入模式：跳过 LLM 输出")
+            get_state().set_output_text(text)
+        elif Config.llm_enabled:
             from util.llm.llm_process_text import llm_process_text
             llm_result = await llm_process_text(
                 text,
@@ -400,6 +497,7 @@ class ResultProcessor:
     
     def _cleanup(self) -> None:
         """清理资源"""
+        self._partial_states.clear()
         if self.state.websocket is not None:
             try:
                 if self.state.websocket.closed:

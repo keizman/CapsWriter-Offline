@@ -69,6 +69,37 @@ class TextOutput:
             await self._paste_text(text)
         else:
             self._type_text(text)
+
+    async def output_streaming(
+        self,
+        text: str,
+        paste: Optional[bool] = None,
+        char_interval_ms: int = 0,
+    ) -> None:
+        """
+        逐字流式输出文本（仅在 partial 输入模式下使用）。
+
+        Args:
+            text: 要输出的增量文本
+            paste: 是否使用粘贴模式；partial 模式下通常为 False
+            char_interval_ms: 每个字符之间的间隔（毫秒）
+        """
+        if not text:
+            return
+
+        if paste is None:
+            paste = Config.paste
+
+        if paste:
+            # 粘贴模式无法提供逐字感知，回退为一次性输出。
+            await self._paste_text(text)
+            return
+
+        delay = max(0.0, float(char_interval_ms) / 1000.0)
+        for ch in text:
+            self._type_text(ch)
+            if delay > 0:
+                await asyncio.sleep(delay)
     
     async def _paste_text(self, text: str) -> None:
         """

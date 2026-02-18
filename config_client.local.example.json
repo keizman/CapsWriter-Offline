@@ -10,5 +10,9 @@
     "release_tail_max_ms": 1000,
     "release_tail_silence_ms": 180,
     "release_tail_vad_threshold": 0.02
+  },
+  "output": {
+    "partial_input_enabled": false,
+    "partial_input_char_interval_ms": 10
   }
 }
