@@ -80,6 +80,14 @@ def _cfg_int(env_name: str, *keys, default: int) -> int:
         return default
 
 
+def _cfg_float(env_name: str, *keys, default: float) -> float:
+    value = _cfg(env_name, *keys, default=default)
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+
 # 服务端配置
 class ServerConfig:
     addr = str(_cfg("CAPSWRITER_SERVER_ADDR", "server", "addr", default='0.0.0.0'))
@@ -120,6 +128,41 @@ class ServerConfig:
             "server", "queue_stale_secs",
             default=2.0
         )
+    )
+
+    # HTTP Transcript API（与 WS 同时启动，独立端口）
+    http_enable = _cfg_bool(
+        "CAPSWRITER_HTTP_ENABLE",
+        "server", "http_enable",
+        default=True
+    )
+    http_addr = str(_cfg("CAPSWRITER_HTTP_ADDR", "server", "http_addr", default=addr))
+    http_port = str(
+        _cfg(
+            "CAPSWRITER_HTTP_PORT",
+            "server", "http_port",
+            default=str(_cfg_int("CAPSWRITER_SERVER_PORT", "server", "port", default=6016) + 1)
+        )
+    )
+    http_max_upload_mb = _cfg_int(
+        "CAPSWRITER_HTTP_MAX_UPLOAD_MB",
+        "server", "http_max_upload_mb",
+        default=200
+    )
+    http_timeout_secs = _cfg_int(
+        "CAPSWRITER_HTTP_TIMEOUT_SECS",
+        "server", "http_timeout_secs",
+        default=600
+    )
+    http_seg_duration = _cfg_float(
+        "CAPSWRITER_HTTP_SEG_DURATION",
+        "server", "http_seg_duration",
+        default=60.0
+    )
+    http_seg_overlap = _cfg_float(
+        "CAPSWRITER_HTTP_SEG_OVERLAP",
+        "server", "http_seg_overlap",
+        default=4.0
     )
 
     # 前缀翻译指令（服务端处理，客户端无感）

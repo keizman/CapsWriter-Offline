@@ -1,5 +1,4 @@
 import time
-import re
 import ctypes
 import numpy as np
 from typing import List, Tuple, Optional, Dict, Any
@@ -118,12 +117,6 @@ class LLMDecoder:
                     res.is_aborted = True
                     break
 
-                # 达到30个token时还没生成标点，熔断
-                if len(asr_decoder.tokens) == 30: 
-                    if not re.search(r'[，。？！、；：,\.?!;:]', asr_decoder.generated_text):
-                        res.is_aborted = True
-                        break
-
 
         
         asr_decoder.flush()
@@ -215,16 +208,25 @@ class StreamDecoder:
             full_embd = np.concatenate([p_embd, audio_embd.astype(np.float32), s_embd], axis=0)
 
             # LLM 解码循环：若熔断则加温重试（最多重试 3 次）
+            retry_temperature = temperature
             for _ in range(4):
                 llm_res = self.llm_decoder.decode(
                     full_embd, full_embd.shape[0], self.models.config.n_predict, 
                     stream_output=verbose, reporter=reporter,
-                    temperature=temperature, top_p=top_p, top_k=top_k
+                    temperature=retry_temperature, top_p=top_p, top_k=top_k
                 )
-                if not llm_res.is_aborted: break
-                temperature += 0.3
-                llm_res.text += "====解码有误，强制熔断===="
-                print(f"\n\n[!] 解码有误，熔断重试 (温度设为 {temperature:.1f})\n")
+                if not llm_res.is_aborted:
+                    break
+                retry_temperature += 0.3
+                print(f"\n\n[!] 解码有误，熔断重试 (温度设为 {retry_temperature:.1f})\n")
+
+            # 若 LLM 多次熔断，回退到 CTC 文本，避免返回熔断占位串。
+            if llm_res.is_aborted:
+                ctc_fallback_text = "".join([r.text for r in ctc_results]).strip()
+                if ctc_fallback_text:
+                    logger.warning("LLM 熔断，回退 CTC 文本输出")
+                    llm_res.text = ctc_fallback_text
+                    llm_res.is_aborted = False
 
             text = llm_res.text.strip()
             timings.inject = llm_res.t_inject

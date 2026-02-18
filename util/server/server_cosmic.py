@@ -7,7 +7,7 @@
 """
 
 from multiprocessing import Queue
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 
 import websockets
 from rich.console import Console
@@ -39,3 +39,6 @@ class Cosmic:
     # 消息队列
     queue_in: Queue = Queue()
     queue_out: Queue = Queue()
+
+    # HTTP 转录请求等待器（task_id -> asyncio Future）
+    http_waiters: Dict[str, Any] = {}

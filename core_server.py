@@ -12,6 +12,7 @@ from util.logger import setup_logger
 from util.common.lifecycle import lifecycle
 from util.server.cleanup import setup_tray, print_banner, cleanup_server_resources, console
 from util.server.service import start_recognizer_process
+from util.server.server_http import start_http_server, stop_http_server
 import logging
 
 
@@ -90,43 +91,48 @@ async def run_websocket_server():
 
     # 2. 启动服务器
     logger.info(f"WebSocket 服务器正在启动，监听地址: {Config.addr}:{Config.port}")
-    async with websockets.serve(ws_recv,
-                                Config.addr,
-                                Config.port,
-                                process_request=process_ws_request,
-                                subprotocols=["binary"],
-                                max_size=None):
-        
-        send_task = asyncio.create_task(ws_send())
-        
-        # 3. 等待退出信号
-        # 如果已经处于 shutting down 状态，ensure event is set
-        if lifecycle.is_shutting_down:
-            lifecycle._shutdown_event.set()
+    http_runner = await start_http_server()
 
-        wait_shutdown_task = asyncio.create_task(lifecycle.wait_for_shutdown())
+    try:
+        async with websockets.serve(ws_recv,
+                                    Config.addr,
+                                    Config.port,
+                                    process_request=process_ws_request,
+                                    subprotocols=["binary"],
+                                    max_size=None):
 
-        done, pending = await asyncio.wait(
-            [send_task, wait_shutdown_task],
-            return_when=asyncio.FIRST_COMPLETED
-        )
+            send_task = asyncio.create_task(ws_send())
 
-        if wait_shutdown_task in done:
-            logger.info("收到退出信号，正在关闭服务...")
-        
-        # 4. 取消所有相关任务
-        for task in pending:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-        
-        if send_task in done and not send_task.cancelled():
-            try:
-                await send_task
-            except Exception as e:
-                logger.error(f"发送任务异常退出: {e}")
+            # 3. 等待退出信号
+            # 如果已经处于 shutting down 状态，ensure event is set
+            if lifecycle.is_shutting_down:
+                lifecycle._shutdown_event.set()
+
+            wait_shutdown_task = asyncio.create_task(lifecycle.wait_for_shutdown())
+
+            done, pending = await asyncio.wait(
+                [send_task, wait_shutdown_task],
+                return_when=asyncio.FIRST_COMPLETED
+            )
+
+            if wait_shutdown_task in done:
+                logger.info("收到退出信号，正在关闭服务...")
+
+            # 4. 取消所有相关任务
+            for task in pending:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+            if send_task in done and not send_task.cancelled():
+                try:
+                    await send_task
+                except Exception as e:
+                    logger.error(f"发送任务异常退出: {e}")
+    finally:
+        await stop_http_server(http_runner)
 
 
 def init():

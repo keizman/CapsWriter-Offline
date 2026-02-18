@@ -59,6 +59,8 @@ hiddenimports += [
     'websockets',
     'websockets.client',
     'websockets.server',
+    'aiohttp',
+    'aiohttp.web',
     'rich',
     'rich.console',
     'rich.markdown',

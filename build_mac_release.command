@@ -30,6 +30,8 @@ COMMON_ARGS=(
   --exclude-module _watchdog_fsevents
   --exclude-module watchdog.observers.fsevents
   --hidden-import rich._unicode_data.unicode17-0-0
+  --hidden-import aiohttp
+  --hidden-import aiohttp.web
 )
 
 echo "[1/6] Build server app..."

@@ -179,13 +179,6 @@ class ClientConfig:
                 'hold_mode': True,
                 'enabled': True
             },
-            {
-                'key': 'x2',
-                'type': 'mouse',
-                'suppress': True,
-                'hold_mode': True,
-                'enabled': True
-            },
         ]
         if _IS_WINDOWS
         else [

@@ -16,6 +16,7 @@ async def ws_send():
 
     queue_out = Cosmic.queue_out
     sockets = Cosmic.sockets
+    http_waiters = Cosmic.http_waiters
 
     logger.info("WebSocket 发送任务已启动")
 
@@ -39,6 +40,15 @@ async def ws_send():
                         result.socket_id,
                         result.reason,
                     )
+                continue
+
+            # HTTP 请求等待通道：只消费最终结果，不经过 WS 下发
+            http_waiter = http_waiters.get(result.task_id)
+            if http_waiter is not None:
+                queue_guard.on_task_done(result.socket_id)
+                if result.is_final and not http_waiter.done():
+                    http_waiters.pop(result.task_id, None)
+                    http_waiter.set_result(result)
                 continue
 
             # 构建消息
@@ -84,4 +94,3 @@ async def ws_send():
         except Exception as e:
             logger.error(f"发送结果时发生错误: {e}", exc_info=True)
             print(e)
-
