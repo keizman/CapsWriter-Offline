@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Optional
 import numpy as np
 import sounddevice as sd
 
+from config_client import ClientConfig as Config
 from util.client.state import console, get_state
 from util.client.ui import set_flow_audio_level
 from . import logger
@@ -87,6 +88,9 @@ class AudioStreamManager:
             # 自适应 AGC：动态跟随噪声底与说话峰值，提升中小音量可视化反馈。
             rms = float(np.sqrt(np.mean(np.square(indata))))
             rms = max(0.0, rms)
+            self.state.latest_rms = rms
+            if rms >= float(Config.release_tail_vad_threshold):
+                self.state.last_voice_activity_time = time.time()
 
             if rms < self._rms_floor:
                 self._rms_floor += (rms - self._rms_floor) * self.VIS_FLOOR_FOLLOW_DOWN

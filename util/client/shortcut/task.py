@@ -10,6 +10,7 @@ import time
 from threading import Event
 from typing import TYPE_CHECKING, Optional
 
+from config_client import ClientConfig as Config
 from . import logger
 from util.client.audio.cue_player import play_dictation_start, play_dictation_stop
 from util.client.ui import (
@@ -50,6 +51,7 @@ class ShortcutTask:
         self.task: Optional[asyncio.Future] = None
         self.recording_start_time: float = 0.0
         self.is_recording: bool = False
+        self._finish_pending: bool = False
 
         # hold_mode 状态跟踪
         self.pressed: bool = False
@@ -71,6 +73,8 @@ class ShortcutTask:
 
     def launch(self) -> None:
         """启动录音任务"""
+        # 如果存在延迟结束中的旧会话，先取消其尾留音收尾任务
+        self._finish_pending = False
         logger.info(f"[{self.shortcut.key}] 触发：开始录音")
         play_dictation_start()
         set_flow_state_active_ptt()
@@ -101,6 +105,7 @@ class ShortcutTask:
     def cancel(self) -> None:
         """取消录音任务（时间过短）"""
         logger.debug(f"[{self.shortcut.key}] 取消录音任务（时间过短）")
+        self._finish_pending = False
         play_dictation_stop()
         set_flow_state_resting()
 
@@ -111,8 +116,56 @@ class ShortcutTask:
         self.task.cancel()
         self.task = None
 
-    def finish(self) -> None:
-        """完成录音任务"""
+    async def _finish_with_release_tail(self) -> None:
+        """
+        松键后尾留音，避免尾字丢失。
+
+        规则：
+        - 至少等待 release_tail_ms
+        - 若仍有语音活动，则最多延长到 release_tail_max_ms
+        - 检测到连续静音 release_tail_silence_ms 后结束
+        """
+        release_time = time.time()
+        min_wait = max(0.0, float(Config.release_tail_ms) / 1000.0)
+        max_wait = max(min_wait, float(Config.release_tail_max_ms) / 1000.0)
+        silence_wait = max(0.0, float(Config.release_tail_silence_ms) / 1000.0)
+        adaptive = bool(Config.release_tail_adaptive)
+
+        while self._finish_pending and self.is_recording:
+            now = time.time()
+            elapsed = now - release_time
+
+            if elapsed >= max_wait:
+                break
+
+            if elapsed < min_wait:
+                await asyncio.sleep(min(0.02, min_wait - elapsed))
+                continue
+
+            if not adaptive:
+                break
+
+            last_voice = max(
+                float(getattr(self.state, "last_voice_activity_time", 0.0)),
+                self.recording_start_time,
+            )
+            silence_elapsed = now - last_voice
+            if silence_elapsed >= silence_wait:
+                break
+
+            await asyncio.sleep(0.02)
+
+        if not self._finish_pending or not self.is_recording:
+            return
+        self._finalize_finish()
+
+    def _finalize_finish(self) -> None:
+        """真正结束录音并发送最终片段标志。"""
+        if not self.is_recording:
+            self._finish_pending = False
+            return
+
+        self._finish_pending = False
         logger.info(f"[{self.shortcut.key}] 释放：完成录音")
         play_dictation_stop()
         set_flow_state_processing()
@@ -134,6 +187,30 @@ class ShortcutTask:
         # 阻塞模式下按键不会发送到系统，状态不会改变，不需要恢复
         if self.shortcut.is_toggle_key() and not self.shortcut.suppress:
             self._restore_key()
+
+    def finish(self) -> None:
+        """完成录音任务"""
+        if not self.is_recording:
+            return
+        if self._finish_pending:
+            return
+
+        tail_enabled = bool(Config.release_tail_enabled)
+        tail_ms = max(0, int(Config.release_tail_ms))
+
+        if not tail_enabled or tail_ms <= 0:
+            self._finalize_finish()
+            return
+
+        self._finish_pending = True
+        logger.debug(
+            f"[{self.shortcut.key}] 松键尾留音: min={tail_ms}ms, "
+            f"max={int(Config.release_tail_max_ms)}ms, adaptive={bool(Config.release_tail_adaptive)}"
+        )
+        asyncio.run_coroutine_threadsafe(
+            self._finish_with_release_tail(),
+            self.state.loop
+        )
 
     def _restore_key(self) -> None:
         """恢复按键状态（防自捕获逻辑由 ShortcutManager 处理）"""

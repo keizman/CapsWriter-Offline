@@ -68,6 +68,8 @@ class ClientState:
 
     recording: bool = False
     recording_start_time: float = 0.0
+    last_voice_activity_time: float = 0.0
+    latest_rms: float = 0.0
     audio_files: Dict[str, Path] = field(default_factory=dict)
 
     # 最近一次识别结果（用于手动添加纠错记录）
@@ -116,6 +118,8 @@ class ClientState:
         # 重置其他状态
         self.recording = False
         self.recording_start_time = 0.0
+        self.last_voice_activity_time = 0.0
+        self.latest_rms = 0.0
         self.audio_files.clear()
         
         logger.debug("客户端状态重置完成")
@@ -129,6 +133,8 @@ class ClientState:
         """
         self.recording = True
         self.recording_start_time = start_time
+        self.last_voice_activity_time = start_time
+        self.latest_rms = 0.0
         logger.debug(f"录音状态已更新: recording=True, start_time={start_time:.2f}")
     
     def stop_recording(self) -> float:
@@ -144,6 +150,7 @@ class ClientState:
         
         self.recording = False
         self.recording_start_time = 0.0
+        self.latest_rms = 0.0
         logger.debug(f"录音状态已更新: recording=False, duration={duration:.2f}s")
         return duration
     

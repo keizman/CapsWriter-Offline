@@ -101,6 +101,36 @@ def _cfg(env_name: str, *keys, default=None):
     return _get_override(*keys, default=default)
 
 
+def _cfg_bool(env_name: str, *keys, default: bool = False) -> bool:
+    value = _cfg(env_name, *keys, default=default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on", "y"}:
+        return True
+    if text in {"0", "false", "no", "off", "n"}:
+        return False
+    return default
+
+
+def _cfg_int(env_name: str, *keys, default: int) -> int:
+    value = _cfg(env_name, *keys, default=default)
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+
+def _cfg_float(env_name: str, *keys, default: float) -> float:
+    value = _cfg(env_name, *keys, default=default)
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+
 def _normalize_ws_uri(uri: str) -> str:
     """规范化服务端地址为 ws/wss URI。"""
     text = str(uri or "").strip()
@@ -207,6 +237,37 @@ class ClientConfig:
     )
 
     threshold    = 0.3          # 快捷键触发阈值（秒）
+    # 松开按键后的尾留音（避免尾字被截断）
+    release_tail_enabled = _cfg_bool(
+        "CAPSWRITER_RELEASE_TAIL_ENABLED",
+        "recording", "release_tail_enabled",
+        default=True
+    )
+    release_tail_adaptive = _cfg_bool(
+        "CAPSWRITER_RELEASE_TAIL_ADAPTIVE",
+        "recording", "release_tail_adaptive",
+        default=True
+    )
+    release_tail_ms = _cfg_int(
+        "CAPSWRITER_RELEASE_TAIL_MS",
+        "recording", "release_tail_ms",
+        default=350
+    )
+    release_tail_max_ms = _cfg_int(
+        "CAPSWRITER_RELEASE_TAIL_MAX_MS",
+        "recording", "release_tail_max_ms",
+        default=1000
+    )
+    release_tail_silence_ms = _cfg_int(
+        "CAPSWRITER_RELEASE_TAIL_SILENCE_MS",
+        "recording", "release_tail_silence_ms",
+        default=180
+    )
+    release_tail_vad_threshold = _cfg_float(
+        "CAPSWRITER_RELEASE_TAIL_VAD_THRESHOLD",
+        "recording", "release_tail_vad_threshold",
+        default=0.02
+    )
 
     paste        = not _IS_WINDOWS  # 非 Windows 默认使用粘贴，兼容性更好
     restore_clip = True         # 模拟粘贴后是否恢复剪贴板

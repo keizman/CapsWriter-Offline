@@ -2,5 +2,13 @@
   "server": {
     "uri": "ws://192.168.1.50:6016",
     "secret": "replace-with-your-secret"
+  },
+  "recording": {
+    "release_tail_enabled": true,
+    "release_tail_adaptive": true,
+    "release_tail_ms": 350,
+    "release_tail_max_ms": 1000,
+    "release_tail_silence_ms": 180,
+    "release_tail_vad_threshold": 0.02
   }
 }
