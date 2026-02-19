@@ -421,8 +421,10 @@ class AudioStreamManager:
             # 重载 PortAudio，更新设备列表
             try:
                 sd._terminate()
-                sd._ffi.dlclose(sd._lib)
-                sd._lib = sd._ffi.dlopen(sd._libname)
+                # macOS 下保留完整重载；Windows/Linux 避免 dlclose 带来的不稳定。
+                if sys.platform == "darwin":
+                    sd._ffi.dlclose(sd._lib)
+                    sd._lib = sd._ffi.dlopen(sd._libname)
                 sd._initialize()
             except Exception as e:
                 logger.warning(f"重载 PortAudio 时发生警告: {e}")

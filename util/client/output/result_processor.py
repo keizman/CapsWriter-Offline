@@ -124,6 +124,8 @@ class ResultProcessor:
         self,
         state: PartialCommitState,
         target_text: str,
+        *,
+        streaming: bool,
     ) -> None:
         """
         将 target_text 中相对已提交部分的增量输出到输入框。
@@ -148,11 +150,21 @@ class ResultProcessor:
         if not delta:
             return
 
-        await self._text_output.output_streaming(
-            delta,
-            paste=False,  # partial 模式强制逐字打字，不走粘贴
-            char_interval_ms=int(Config.partial_input_char_interval_ms),
-        )
+        if streaming:
+            await self._text_output.output_streaming(
+                delta,
+                paste=False,  # 录音中逐字输出，提供实时感
+                char_interval_ms=int(Config.partial_input_char_interval_ms),
+            )
+        else:
+            # 松键后（或非录音态）剩余内容走原始快速上屏，避免逐字等待。
+            paste = Config.paste
+            window_info = get_active_window_info()
+            should_force_paste, _ = _should_force_paste(window_info)
+            if should_force_paste:
+                paste = True
+            await self._text_output.output(delta, paste=paste)
+
         state.committed_text += delta
         get_state().set_output_text(state.committed_text)
 
@@ -166,16 +178,19 @@ class ResultProcessor:
 
         current_text = str(message.get("text", "") or "")
         state = self._partial_states.setdefault(task_id, PartialCommitState())
+        is_final = bool(message.get("is_final", False))
+        # 只有“按键按住录音中”才使用逐字上屏；松键后全部改为快速上屏。
+        use_streaming = bool(self.state.recording) and not is_final
 
         # 非 final：收到下一 block 时，提交上一 block 与当前 block 的稳定前缀（lag=1）
-        if not message.get("is_final", False):
+        if not is_final:
             if not state.prev_partial:
                 state.prev_partial = current_text
                 return
 
             stable_len = self._lcp_len(state.prev_partial, current_text)
             stable_text = current_text[:stable_len]
-            await self._commit_partial_increment(state, stable_text)
+            await self._commit_partial_increment(state, stable_text, streaming=use_streaming)
             state.prev_partial = current_text
             return
 
@@ -183,9 +198,9 @@ class ResultProcessor:
         if state.prev_partial:
             stable_len = self._lcp_len(state.prev_partial, current_text)
             stable_text = current_text[:stable_len]
-            await self._commit_partial_increment(state, stable_text)
+            await self._commit_partial_increment(state, stable_text, streaming=use_streaming)
 
-        await self._commit_partial_increment(state, current_text)
+        await self._commit_partial_increment(state, current_text, streaming=use_streaming)
         self._partial_states.pop(task_id, None)
     
     def _format_llm_result(self, llm_result) -> str:

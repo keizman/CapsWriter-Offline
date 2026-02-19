@@ -28,8 +28,29 @@ def _setup_tray(state, base_dir):
 
     def restart_audio():
         if state.stream_manager:
-            state.stream_manager.reopen()
-            logger.info("用户请求重启音频")
+            if state.recording:
+                from util.client.ui import toast
+                toast("请先松开录音键，再重启音频", duration=2200, bg="#9A3412")
+                logger.warning("用户在录音中请求重启音频，已拒绝")
+                return
+
+            # 托盘重启音频前，热加载运行时配置（例如 partial_input_enabled）。
+            Config.reload_runtime_settings()
+            if state.processor and hasattr(state.processor, "_partial_states"):
+                state.processor._partial_states.clear()
+            state.stream_manager.reopen(reason="用户请求重启音频")
+            from util.client.ui import toast
+            toast(
+                f"音频已重启，partial_input_enabled={Config.partial_input_enabled}",
+                duration=2200,
+                bg="#075077",
+            )
+            logger.info(
+                "用户请求重启音频，已重载配置: partial=%s, seg=%ss/%ss",
+                Config.partial_input_enabled,
+                Config.partial_input_seg_duration,
+                Config.partial_input_seg_overlap,
+            )
 
     def clear_memory():
         from util.llm.llm_handler import clear_llm_history

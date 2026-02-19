@@ -51,6 +51,25 @@ class AudioRecorder:
         self._start_time: float = 0.0
         self._duration: float = 0.0
         self._cache: list = []
+
+    @staticmethod
+    def _resolve_mic_segmentation() -> tuple[int, int]:
+        """
+        解析本次录音的分段参数。
+
+        - partial_input_enabled=true: 使用更短分段，支持按住说话时持续回传中间结果
+        - partial_input_enabled=false: 保持原始分段策略
+        """
+        if bool(getattr(Config, "partial_input_enabled", False)):
+            seg_duration = int(getattr(Config, "partial_input_seg_duration", 6))
+            seg_overlap = int(getattr(Config, "partial_input_seg_overlap", 1))
+        else:
+            seg_duration = int(getattr(Config, "mic_seg_duration", 60))
+            seg_overlap = int(getattr(Config, "mic_seg_overlap", 4))
+
+        seg_duration = max(1, seg_duration)
+        seg_overlap = max(0, min(seg_overlap, seg_duration - 1))
+        return seg_duration, seg_overlap
     
     async def _send_message(self, message: dict) -> None:
         """发送消息到服务端"""
@@ -97,6 +116,11 @@ class AudioRecorder:
             # 生成唯一任务 ID
             self.task_id = str(uuid.uuid1())
             logger.debug(f"创建录音任务，任务ID: {self.task_id}")
+            seg_duration, seg_overlap = self._resolve_mic_segmentation()
+            logger.debug(
+                "录音分段参数: seg_duration=%ss, seg_overlap=%ss, partial=%s",
+                seg_duration, seg_overlap, bool(getattr(Config, "partial_input_enabled", False))
+            )
             
             self._start_time = 0.0
             self._duration = 0.0
@@ -145,8 +169,8 @@ class AudioRecorder:
                     # 发送音频数据用于识别
                     message = {
                         'task_id': self.task_id,
-                        'seg_duration': Config.mic_seg_duration,
-                        'seg_overlap': Config.mic_seg_overlap,
+                        'seg_duration': seg_duration,
+                        'seg_overlap': seg_overlap,
                         'is_final': False,
                         'time_start': self._start_time,
                         'time_frame': task['time'],
@@ -170,8 +194,8 @@ class AudioRecorder:
 
                         message = {
                             'task_id': self.task_id,
-                            'seg_duration': Config.mic_seg_duration,
-                            'seg_overlap': Config.mic_seg_overlap,
+                            'seg_duration': seg_duration,
+                            'seg_overlap': seg_overlap,
                             'is_final': False,
                             'time_start': self._start_time,
                             'time_frame': task['time'],
@@ -195,8 +219,8 @@ class AudioRecorder:
                     # 告诉服务端音频片段结束了
                     message = {
                         'task_id': self.task_id,
-                        'seg_duration': 15,
-                        'seg_overlap': 2,
+                        'seg_duration': seg_duration,
+                        'seg_overlap': seg_overlap,
                         'is_final': True,
                         'time_start': self._start_time,
                         'time_frame': task['time'],

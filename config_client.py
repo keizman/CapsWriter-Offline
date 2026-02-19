@@ -131,6 +131,25 @@ def _cfg_float(env_name: str, *keys, default: float) -> float:
         return default
 
 
+def _normalize_partial_input_mode(value) -> str:
+    """
+    统一解析 partial_input_enabled：
+    - true/1/yes/on  => "true"  （启用 partial）
+    - force          => "force" （强制原始模式）
+    - 其他            => "false"
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return "true" if bool(value) else "false"
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on", "y"}:
+        return "true"
+    if text == "force":
+        return "force"
+    return "false"
+
+
 def _normalize_ws_uri(uri: str) -> str:
     """规范化服务端地址为 ws/wss URI。"""
     text = str(uri or "").strip()
@@ -191,6 +210,93 @@ class ClientConfig:
     def server_display(cls) -> str:
         """返回用于 UI 显示的服务端地址。"""
         return cls.server_uri
+
+    @classmethod
+    def reload_runtime_settings(cls) -> None:
+        """
+        重新加载运行时可热更新配置（主要用于托盘“重启音频”）。
+
+        说明：
+        - 仅刷新录音/输出相关的关键字段，避免影响当前会话稳定性。
+        - server_uri / secret 等连接参数仍建议重启客户端后生效。
+        """
+        global _OVERRIDES
+        _OVERRIDES = _load_local_overrides()
+
+        cls.threshold = _cfg_float("CAPSWRITER_THRESHOLD", "recording", "threshold", default=cls.threshold)
+        cls.release_tail_enabled = _cfg_bool(
+            "CAPSWRITER_RELEASE_TAIL_ENABLED",
+            "recording", "release_tail_enabled",
+            default=cls.release_tail_enabled
+        )
+        cls.release_tail_adaptive = _cfg_bool(
+            "CAPSWRITER_RELEASE_TAIL_ADAPTIVE",
+            "recording", "release_tail_adaptive",
+            default=cls.release_tail_adaptive
+        )
+        cls.release_tail_ms = _cfg_int(
+            "CAPSWRITER_RELEASE_TAIL_MS",
+            "recording", "release_tail_ms",
+            default=cls.release_tail_ms
+        )
+        cls.release_tail_max_ms = _cfg_int(
+            "CAPSWRITER_RELEASE_TAIL_MAX_MS",
+            "recording", "release_tail_max_ms",
+            default=cls.release_tail_max_ms
+        )
+        cls.release_tail_silence_ms = _cfg_int(
+            "CAPSWRITER_RELEASE_TAIL_SILENCE_MS",
+            "recording", "release_tail_silence_ms",
+            default=cls.release_tail_silence_ms
+        )
+        cls.release_tail_vad_threshold = _cfg_float(
+            "CAPSWRITER_RELEASE_TAIL_VAD_THRESHOLD",
+            "recording", "release_tail_vad_threshold",
+            default=cls.release_tail_vad_threshold
+        )
+
+        cls.partial_input_char_interval_ms = _cfg_int(
+            "CAPSWRITER_PARTIAL_INPUT_CHAR_INTERVAL_MS",
+            "output", "partial_input_char_interval_ms",
+            default=cls.partial_input_char_interval_ms
+        )
+        cls.partial_input_mode = _normalize_partial_input_mode(
+            _cfg("CAPSWRITER_PARTIAL_INPUT_ENABLED", "output", "partial_input_enabled", default=cls.partial_input_mode)
+        )
+        cls.partial_input_enabled = cls.partial_input_mode == "true"
+        cls.partial_input_force_legacy = cls.partial_input_mode == "force"
+        cls.partial_input_seg_duration = _cfg_int(
+            "CAPSWRITER_PARTIAL_INPUT_SEG_DURATION",
+            "output", "partial_input_seg_duration",
+            default=cls.partial_input_seg_duration
+        )
+        cls.partial_input_seg_overlap = _cfg_int(
+            "CAPSWRITER_PARTIAL_INPUT_SEG_OVERLAP",
+            "output", "partial_input_seg_overlap",
+            default=cls.partial_input_seg_overlap
+        )
+
+        cls.mic_seg_duration = _cfg_int(
+            "CAPSWRITER_MIC_SEG_DURATION",
+            "recording", "mic_seg_duration",
+            default=cls.mic_seg_duration
+        )
+        cls.mic_seg_overlap = _cfg_int(
+            "CAPSWRITER_MIC_SEG_OVERLAP",
+            "recording", "mic_seg_overlap",
+            default=cls.mic_seg_overlap
+        )
+
+        cls.audio_device_auto_refresh = _cfg_bool(
+            "CAPSWRITER_AUDIO_DEVICE_AUTO_REFRESH",
+            "audio", "device_auto_refresh",
+            default=cls.audio_device_auto_refresh
+        )
+        cls.audio_device_poll_interval_secs = _cfg_float(
+            "CAPSWRITER_AUDIO_DEVICE_POLL_INTERVAL_SECS",
+            "audio", "device_poll_interval_secs",
+            default=cls.audio_device_poll_interval_secs
+        )
 
     # 快捷键配置列表
     shortcuts = (
@@ -270,15 +376,26 @@ class ClientConfig:
     )
 
     # Partial 输入模式（流式边说边上屏）
-    partial_input_enabled = _cfg_bool(
-        "CAPSWRITER_PARTIAL_INPUT_ENABLED",
-        "output", "partial_input_enabled",
-        default=False
-    )
     partial_input_char_interval_ms = _cfg_int(
         "CAPSWRITER_PARTIAL_INPUT_CHAR_INTERVAL_MS",
         "output", "partial_input_char_interval_ms",
         default=10
+    )
+    partial_input_mode = _normalize_partial_input_mode(
+        _cfg("CAPSWRITER_PARTIAL_INPUT_ENABLED", "output", "partial_input_enabled", default=False)
+    )
+    partial_input_enabled = partial_input_mode == "true"
+    partial_input_force_legacy = partial_input_mode == "force"
+    # partial 模式下使用更短分段，保证“按住说话过程中”可持续回传中间结果
+    partial_input_seg_duration = _cfg_int(
+        "CAPSWRITER_PARTIAL_INPUT_SEG_DURATION",
+        "output", "partial_input_seg_duration",
+        default=6
+    )
+    partial_input_seg_overlap = _cfg_int(
+        "CAPSWRITER_PARTIAL_INPUT_SEG_OVERLAP",
+        "output", "partial_input_seg_overlap",
+        default=1
     )
 
     # 输入设备热插拔自动刷新
