@@ -14,5 +14,9 @@
   "output": {
     "partial_input_enabled": false,
     "partial_input_char_interval_ms": 10
+  },
+  "audio": {
+    "device_auto_refresh": true,
+    "device_poll_interval_secs": 1.5
   }
 }

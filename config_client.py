@@ -281,6 +281,18 @@ class ClientConfig:
         default=10
     )
 
+    # 输入设备热插拔自动刷新
+    audio_device_auto_refresh = _cfg_bool(
+        "CAPSWRITER_AUDIO_DEVICE_AUTO_REFRESH",
+        "audio", "device_auto_refresh",
+        default=True
+    )
+    audio_device_poll_interval_secs = _cfg_float(
+        "CAPSWRITER_AUDIO_DEVICE_POLL_INTERVAL_SECS",
+        "audio", "device_poll_interval_secs",
+        default=1.5
+    )
+
     paste        = not _IS_WINDOWS  # 非 Windows 默认使用粘贴，兼容性更好
     restore_clip = True         # 模拟粘贴后是否恢复剪贴板
 
