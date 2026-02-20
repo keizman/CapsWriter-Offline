@@ -72,6 +72,7 @@ class AudioStreamManager:
         self._device_monitor_stop = threading.Event()
         self._device_snapshot: tuple[str, ...] = tuple()
         self._stream_lock = threading.RLock()
+        self._last_reported_device_signature: Optional[str] = None
 
     @staticmethod
     def _safe_str(value: Any) -> str:
@@ -91,7 +92,41 @@ class AudioStreamManager:
     def _device_signature(self, index: int, info: dict) -> str:
         name = self._safe_str(info.get("name", ""))
         hostapi_name = self._resolve_hostapi_name(info.get("hostapi"))
-        return f"{index}|{hostapi_name}|{name}"
+        # 不使用 index，避免 Windows 下设备索引波动导致“同设备被误判为变化”。
+        return f"{hostapi_name}|{name}"
+
+    @staticmethod
+    def _is_windows() -> bool:
+        return sys.platform.startswith("win")
+
+    @staticmethod
+    def _is_sound_mapper_name(name: str) -> bool:
+        lowered = str(name or "").lower()
+        return "sound mapper" in lowered
+
+    def _windows_wasapi_default_index(self) -> Optional[int]:
+        """
+        获取 Windows WASAPI 的默认输入设备索引（如果存在）。
+
+        目的：避免落到 MME 的 Sound Mapper 抽象设备，优先使用具体物理设备。
+        """
+        if not self._is_windows():
+            return None
+        try:
+            hostapis = sd.query_hostapis()
+        except Exception:
+            return None
+        for hostapi in hostapis:
+            name = self._safe_str(hostapi.get("name", "")).lower()
+            if "wasapi" not in name:
+                continue
+            try:
+                idx = int(hostapi.get("default_input_device", -1))
+            except Exception:
+                idx = -1
+            if idx >= 0:
+                return idx
+        return None
 
     def _list_input_devices(self) -> list[dict]:
         devices: list[dict] = []
@@ -142,9 +177,20 @@ class AudioStreamManager:
 
         default_index = self._default_input_device_index()
         if default_index is not None:
+            selected_default = None
             for dev in inputs:
                 if dev["index"] == default_index:
-                    return dev
+                    selected_default = dev
+                    break
+            if selected_default is not None:
+                # Windows 下默认若落到 Sound Mapper，尽量切到 WASAPI 的具体默认输入设备。
+                if self._is_windows() and self._is_sound_mapper_name(selected_default.get("name", "")):
+                    wasapi_default_index = self._windows_wasapi_default_index()
+                    if wasapi_default_index is not None:
+                        for dev in inputs:
+                            if dev["index"] == wasapi_default_index:
+                                return dev
+                return selected_default
 
         return inputs[0]
 
@@ -201,12 +247,18 @@ class AudioStreamManager:
 
     def _handle_device_change(self, inputs: list[dict]) -> None:
         active_signature = self._active_device_signature
-        preferred_signature = self._preferred_device_signature
         available = {dev["signature"] for dev in inputs}
+        selected = self._pick_best_input_device(inputs)
+        selected_signature = selected["signature"] if selected else None
 
-        if self.state.stream is None and inputs:
+        if self.state.stream is None and selected:
             logger.info("检测到可用输入设备，正在自动恢复音频流")
             self.reopen(reason="自动刷新：检测到可用设备，恢复音频流")
+            return
+
+        # 设备集合变化但最终选中设备没变：不重启、不重复选举。
+        if self.state.stream is not None and active_signature and selected_signature == active_signature:
+            logger.debug("设备变化但选中设备未变化，跳过重启")
             return
 
         if active_signature and active_signature not in available:
@@ -214,13 +266,9 @@ class AudioStreamManager:
             self.reopen(reason="自动刷新：当前设备断开，切换到可用设备")
             return
 
-        if (
-            preferred_signature
-            and preferred_signature in available
-            and active_signature != preferred_signature
-        ):
-            logger.info("检测到优先麦克风已恢复，正在自动切回")
-            self.reopen(reason="自动刷新：优先设备已恢复，切回优先设备")
+        if self.state.stream is not None and selected_signature and active_signature != selected_signature:
+            logger.info("检测到输入设备优先级变化，正在切换")
+            self.reopen(reason="自动刷新：输入设备优先级变化，切换设备")
 
     def _create_stream(self, exit_on_missing_device: bool = False) -> Optional[sd.InputStream]:
         # 检测并选择音频设备
@@ -255,20 +303,28 @@ class AudioStreamManager:
         else:
             device_display = str(device_name)
 
-        console.print(
-            f'使用音频设备：[italic]{device_display}，声道数：{self._channels}',
-            end='\n\n'
-        )
-        logger.info(
-            f"使用音频设备: {device_display}, index={selected['index']}, "
-            f"声道数={self._channels}"
-        )
-
         # 如果尚未确定优先设备，则以首次成功设备作为优先设备
         selected_signature = selected["signature"]
         if not self._preferred_device_signature:
             self._preferred_device_signature = selected_signature
             logger.info(f"优先输入设备已设置为: {device_display}")
+
+        if self._last_reported_device_signature != selected_signature:
+            console.print(
+                f'使用音频设备：[italic]{device_display}，声道数：{self._channels}',
+                end='\n\n'
+            )
+            logger.info(
+                f"使用音频设备: {device_display}, index={selected['index']}, "
+                f"声道数={self._channels}"
+            )
+            self._last_reported_device_signature = selected_signature
+        else:
+            logger.debug(
+                "继续使用相同音频设备: %s (index=%s)",
+                device_display,
+                selected["index"],
+            )
 
         # 创建音频流
         try:
@@ -415,7 +471,8 @@ class AudioStreamManager:
         """
         with self._stream_lock:
             logger.info(reason)
-            self._running = True
+            # 先标记非运行，避免“主动关流”被 finished_callback 误判为异常而重复重启。
+            self._running = False
             self._close_stream_only()
 
             # 重载 PortAudio，更新设备列表
