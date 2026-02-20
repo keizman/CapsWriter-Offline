@@ -152,6 +152,20 @@ class AudioStreamManager:
             })
         return devices
 
+    def _normalize_input_device_index(self, value: Any) -> Optional[int]:
+        """
+        从 sounddevice 返回值中提取输入设备索引。
+        """
+        if isinstance(value, (tuple, list)):
+            if not value:
+                return None
+            value = value[0]
+        try:
+            idx = int(value)
+            return idx if idx >= 0 else None
+        except Exception:
+            return None
+
     def _default_input_device_index(self) -> Optional[int]:
         try:
             default_device = sd.default.device
@@ -296,42 +310,29 @@ class AudioStreamManager:
             return None
 
         self._channels = min(2, int(selected["max_input_channels"]))
-        device_name = selected.get("name", "未知设备")
-        hostapi_name = selected.get("hostapi_name", "")
-        if hostapi_name:
-            device_display = f"{device_name} ({hostapi_name})"
-        else:
-            device_display = str(device_name)
+        selected_name = selected.get("name", "未知设备")
+        selected_hostapi = selected.get("hostapi_name", "")
+        selected_display = (
+            f"{selected_name} ({selected_hostapi})" if selected_hostapi else str(selected_name)
+        )
 
-        # 如果尚未确定优先设备，则以首次成功设备作为优先设备
-        selected_signature = selected["signature"]
-        if not self._preferred_device_signature:
-            self._preferred_device_signature = selected_signature
-            logger.info(f"优先输入设备已设置为: {device_display}")
-
-        if self._last_reported_device_signature != selected_signature:
-            console.print(
-                f'使用音频设备：[italic]{device_display}，声道数：{self._channels}',
-                end='\n\n'
-            )
-            logger.info(
-                f"使用音频设备: {device_display}, index={selected['index']}, "
-                f"声道数={self._channels}"
-            )
-            self._last_reported_device_signature = selected_signature
-        else:
+        # Windows 下如果命中 Sound Mapper，改为 device=None，交给 PortAudio 解析真实默认设备（接近旧行为）。
+        chosen_device_index: Optional[int] = int(selected["index"])
+        if self._is_windows() and self._is_sound_mapper_name(selected_name):
             logger.debug(
-                "继续使用相同音频设备: %s (index=%s)",
-                device_display,
-                selected["index"],
+                "检测到 Sound Mapper，回退为系统默认输入设备解析: %s",
+                selected_display,
             )
+            chosen_device_index = None
+
+        selected_signature = selected["signature"]
 
         # 创建音频流
         try:
             stream = sd.InputStream(
                 samplerate=self.SAMPLE_RATE,
                 blocksize=int(self.BLOCK_DURATION * self.SAMPLE_RATE),
-                device=selected["index"],
+                device=chosen_device_index,
                 dtype="float32",
                 channels=self._channels,
                 callback=self._audio_callback,
@@ -339,9 +340,43 @@ class AudioStreamManager:
             )
             stream.start()
 
+            # 以“实际打开后的输入设备”为准更新显示与签名。
+            actual_index = self._normalize_input_device_index(getattr(stream, "device", None))
+            actual_display = selected_display
+            actual_signature = selected_signature
+            if actual_index is not None:
+                try:
+                    actual_raw = sd.query_devices(actual_index)
+                    actual_name = self._safe_str(actual_raw.get("name", "未知设备"))
+                    actual_hostapi = self._resolve_hostapi_name(actual_raw.get("hostapi"))
+                    actual_display = (
+                        f"{actual_name} ({actual_hostapi})" if actual_hostapi else actual_name
+                    )
+                    actual_signature = self._device_signature(actual_index, actual_raw)
+                except Exception:
+                    pass
+
+            # 如果尚未确定优先设备，则以首次成功“实际设备”作为优先设备
+            if not self._preferred_device_signature:
+                self._preferred_device_signature = actual_signature
+                logger.info(f"优先输入设备已设置为: {actual_display}")
+
+            if self._last_reported_device_signature != actual_signature:
+                console.print(
+                    f'使用音频设备：[italic]{actual_display}，声道数：{self._channels}',
+                    end='\n\n'
+                )
+                logger.info(
+                    f"使用音频设备: {actual_display}, stream_device={actual_index}, "
+                    f"声道数={self._channels}"
+                )
+                self._last_reported_device_signature = actual_signature
+            else:
+                logger.debug("继续使用相同音频设备: %s", actual_display)
+
             self.state.stream = stream
             self._running = True
-            self._active_device_signature = selected_signature
+            self._active_device_signature = actual_signature
             logger.debug(
                 f"音频流已启动: 采样率={self.SAMPLE_RATE}, "
                 f"块大小={int(self.BLOCK_DURATION * self.SAMPLE_RATE)}"
