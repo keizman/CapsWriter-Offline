@@ -310,40 +310,79 @@ class AudioStreamManager:
             return None
 
         self._channels = min(2, int(selected["max_input_channels"]))
+        self._channels = max(1, self._channels)
         selected_name = selected.get("name", "未知设备")
         selected_hostapi = selected.get("hostapi_name", "")
         selected_display = (
             f"{selected_name} ({selected_hostapi})" if selected_hostapi else str(selected_name)
         )
 
-        # Windows 下如果命中 Sound Mapper，改为 device=None，交给 PortAudio 解析真实默认设备（接近旧行为）。
+        # Windows 下如果命中 Sound Mapper，优先按“旧行为”探测默认输入并走 device=None。
         chosen_device_index: Optional[int] = int(selected["index"])
+        fallback_display = selected_display
         if self._is_windows() and self._is_sound_mapper_name(selected_name):
-            logger.debug(
-                "检测到 Sound Mapper，回退为系统默认输入设备解析: %s",
-                selected_display,
-            )
+            try:
+                default_input = sd.query_devices(kind="input")
+                default_name = self._safe_str(default_input.get("name", "未知设备"))
+                default_hostapi = self._resolve_hostapi_name(default_input.get("hostapi"))
+                fallback_display = (
+                    f"{default_name} ({default_hostapi})" if default_hostapi else default_name
+                )
+                default_channels = int(default_input.get("max_input_channels", self._channels))
+                self._channels = max(1, min(2, default_channels))
+                logger.debug(
+                    "检测到 Sound Mapper，默认输入探测: %s, 声道=%s",
+                    fallback_display,
+                    self._channels,
+                )
+            except Exception as e:
+                logger.debug(f"探测系统默认输入设备失败，沿用 Sound Mapper 参数: {e}")
             chosen_device_index = None
 
         selected_signature = selected["signature"]
 
         # 创建音频流
-        try:
-            stream = sd.InputStream(
-                samplerate=self.SAMPLE_RATE,
-                blocksize=int(self.BLOCK_DURATION * self.SAMPLE_RATE),
-                device=chosen_device_index,
-                dtype="float32",
-                channels=self._channels,
-                callback=self._audio_callback,
-                finished_callback=self._on_stream_finished,
-            )
-            stream.start()
+        stream = None
+        used_candidate: Optional[int] = None
+        open_candidates = [chosen_device_index]
+        if chosen_device_index is None:
+            # 如果 device=None 失败，回退到预选索引，避免“新逻辑打不开流”。
+            open_candidates.append(int(selected["index"]))
 
+        open_errors: list[str] = []
+        for candidate in open_candidates:
+            try:
+                stream = sd.InputStream(
+                    samplerate=self.SAMPLE_RATE,
+                    blocksize=int(self.BLOCK_DURATION * self.SAMPLE_RATE),
+                    device=candidate,
+                    dtype="float32",
+                    channels=self._channels,
+                    callback=self._audio_callback,
+                    finished_callback=self._on_stream_finished,
+                )
+                stream.start()
+                used_candidate = candidate
+                break
+            except Exception as e:
+                open_errors.append(f"device={candidate}: {e}")
+                stream = None
+
+        if stream is None:
+            logger.error("创建音频流失败: %s", " | ".join(open_errors))
+            return None
+
+        try:
             # 以“实际打开后的输入设备”为准更新显示与签名。
             actual_index = self._normalize_input_device_index(getattr(stream, "device", None))
             actual_display = selected_display
             actual_signature = selected_signature
+            if actual_index is None and isinstance(used_candidate, int):
+                actual_index = used_candidate
+            if actual_index is None:
+                actual_index = self._default_input_device_index()
+            if actual_display == selected_display and fallback_display:
+                actual_display = fallback_display
             if actual_index is not None:
                 try:
                     actual_raw = sd.query_devices(actual_index)
@@ -385,6 +424,10 @@ class AudioStreamManager:
 
         except Exception as e:
             logger.error(f"创建音频流失败: {e}", exc_info=True)
+            try:
+                stream.close()
+            except Exception:
+                pass
             return None
     
     def _audio_callback(

@@ -18,12 +18,14 @@ from util.client.ui.tips import TipsDisplay
 
 
 def toast(*args, **kwargs):
-    from util.ui import toast as _toast
+    # 直接从子模块导入函数，避免被 util.ui.toast 同名模块对象覆盖。
+    from util.ui.toast import toast as _toast
     return _toast(*args, **kwargs)
 
 
 def toast_stream(*args, **kwargs):
-    from util.ui import toast_stream as _toast_stream
+    # 直接从子模块导入函数，避免被 util.ui.toast 同名模块对象覆盖。
+    from util.ui.toast import toast_stream as _toast_stream
     return _toast_stream(*args, **kwargs)
 
 
