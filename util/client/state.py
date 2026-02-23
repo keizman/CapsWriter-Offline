@@ -70,6 +70,7 @@ class ClientState:
     recording_start_time: float = 0.0
     last_voice_activity_time: float = 0.0
     latest_rms: float = 0.0
+    trigger_keys_blocked: bool = False
     audio_files: Dict[str, Path] = field(default_factory=dict)
 
     # 最近一次识别结果（用于手动添加纠错记录）
@@ -120,6 +121,7 @@ class ClientState:
         self.recording_start_time = 0.0
         self.last_voice_activity_time = 0.0
         self.latest_rms = 0.0
+        self.trigger_keys_blocked = False
         self.audio_files.clear()
         
         logger.debug("客户端状态重置完成")

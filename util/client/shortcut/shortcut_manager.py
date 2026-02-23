@@ -62,6 +62,7 @@ class ShortcutManager:
         # 按键恢复状态追踪
         self._restoring_keys = set()
         self._pressed_keys: Set[str] = set()
+        self._temporarily_blocked = False
 
         # 事件处理器
         self._event_handler = ShortcutEventHandler(self.tasks, self._pool, self._emulator)
@@ -131,6 +132,8 @@ class ShortcutManager:
         return False
 
     def _handle_keyboard_press(self, key_name: str) -> None:
+        if self._temporarily_blocked:
+            return
         if not key_name:
             return
         if self._should_ignore_key(key_name, is_release=False):
@@ -152,6 +155,8 @@ class ShortcutManager:
                 self._event_handler.handle_keydown(combo_name, combo_task)
 
     def _handle_keyboard_release(self, key_name: str) -> None:
+        if self._temporarily_blocked:
+            return
         if not key_name:
             return
         if self._should_ignore_key(key_name, is_release=True):
@@ -173,6 +178,8 @@ class ShortcutManager:
         self._pressed_keys.discard(key_name)
 
     def _handle_mouse_press(self, button_name: str) -> None:
+        if self._temporarily_blocked:
+            return
         if not button_name or button_name not in self.tasks:
             return
         if self._should_ignore_key(button_name, is_release=False, is_mouse=True):
@@ -180,6 +187,8 @@ class ShortcutManager:
         self._event_handler.handle_keydown(button_name, self.tasks[button_name])
 
     def _handle_mouse_release(self, button_name: str) -> None:
+        if self._temporarily_blocked:
+            return
         if not button_name:
             return
         if self._should_ignore_key(button_name, is_release=True, is_mouse=True):
@@ -196,6 +205,8 @@ class ShortcutManager:
 
         def win32_event_filter(msg, data):
             if msg not in KEYBOARD_MESSAGES:
+                return True
+            if self._temporarily_blocked:
                 return True
 
             key_name = KeyMapper.vk_to_name(data.vkCode)
@@ -224,6 +235,8 @@ class ShortcutManager:
 
         def win32_event_filter(msg, data):
             if msg not in MOUSE_MESSAGES:
+                return True
+            if self._temporarily_blocked:
                 return True
 
             xbutton = (data.mouseData >> 16) & 0xFFFF
@@ -315,6 +328,51 @@ class ShortcutManager:
 
     def clear_restoring_flag(self, key: str) -> None:
         self._restoring_keys.discard(key)
+
+    def _stop_all_active_tasks(self) -> None:
+        """
+        立即停止所有正在录音的快捷键任务，避免屏蔽开关切换时出现卡录音。
+        """
+        for task in self.tasks.values():
+            if task.is_recording:
+                try:
+                    task.cancel()
+                except Exception as e:
+                    logger.debug(f"停止任务失败 [{task.shortcut.key}]: {e}")
+        self._pressed_keys.clear()
+
+    def set_temporarily_blocked(self, blocked: bool) -> bool:
+        """
+        设置是否临时屏蔽所有触发键。
+
+        Returns:
+            当前最终状态（True=已屏蔽）
+        """
+        blocked = bool(blocked)
+        if self._temporarily_blocked == blocked:
+            return self._temporarily_blocked
+
+        self._temporarily_blocked = blocked
+        self.state.trigger_keys_blocked = blocked
+        if blocked:
+            self._stop_all_active_tasks()
+            logger.info("已临时屏蔽所有触发键")
+        else:
+            logger.info("已恢复触发键响应")
+        return self._temporarily_blocked
+
+    def toggle_temporarily_blocked(self) -> bool:
+        """
+        切换临时屏蔽状态。
+
+        Returns:
+            切换后的状态（True=已屏蔽）
+        """
+        return self.set_temporarily_blocked(not self._temporarily_blocked)
+
+    def is_temporarily_blocked(self) -> bool:
+        """是否已临时屏蔽触发键。"""
+        return self._temporarily_blocked
 
     # ========== 公共接口 ==========
 

@@ -52,6 +52,21 @@ def _setup_tray(state, base_dir):
                 Config.partial_input_seg_overlap,
             )
 
+    def toggle_trigger_keys():
+        manager = getattr(state, "shortcut_manager", None)
+        if manager is None:
+            logger.warning("快捷键管理器尚未初始化，无法切换屏蔽状态")
+            return
+
+        blocked = manager.toggle_temporarily_blocked()
+        from util.client.ui import toast
+        if blocked:
+            toast("已临时屏蔽所有触发键（CapsLock / Ctrl-R 等）", duration=2600, bg="#7C2D12")
+            logger.info("用户启用临时屏蔽触发键")
+        else:
+            toast("已恢复触发键响应", duration=2200, bg="#075077")
+            logger.info("用户关闭临时屏蔽触发键")
+
     def clear_memory():
         from util.llm.llm_handler import clear_llm_history
         clear_llm_history()
@@ -97,6 +112,7 @@ def _setup_tray(state, base_dir):
             ('✨ 添加热词', add_hotword),
             ('🛠️ 添加纠错', add_rectify),
             ('🧹 清除记忆', clear_memory),
+            ('⏸️ 屏蔽/恢复触发键', toggle_trigger_keys),
             ('🔄 重启音频', restart_audio),
         ]
     )
