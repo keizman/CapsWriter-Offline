@@ -18,8 +18,8 @@
     "partial_input_seg_overlap": 1,
     "paste_pre_delay_ms": 20,
     "paste_restore_delay_ms": 180,
-    "paste_remote_pre_delay_ms": 900,
-    "paste_remote_restore_delay_ms": 1200,
+    "paste_remote_pre_delay_ms": 550,
+    "paste_remote_restore_delay_ms": 800,
     "restore_clip_safeguard": false
   },
   "audio": {

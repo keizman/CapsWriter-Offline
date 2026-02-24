@@ -120,6 +120,25 @@ class TextOutput:
             int(Config.paste_restore_delay_ms),
         )
 
+    @staticmethod
+    def _paste_profile_params(paste_profile: str) -> dict:
+        profile = (paste_profile or "default").strip().lower()
+        if profile == "remote":
+            return {
+                "copy_pulse_count": 3,
+                "copy_pulse_interval_ms": 120,
+                "restore_guard_window_ms": 2800,
+                "restore_guard_interval_ms": 250,
+                "restore_baseline_window_ms": 18000,
+            }
+        return {
+            "copy_pulse_count": 1,
+            "copy_pulse_interval_ms": 120,
+            "restore_guard_window_ms": 0,
+            "restore_guard_interval_ms": 250,
+            "restore_baseline_window_ms": 12000,
+        }
+
     async def _paste_text(self, text: str, paste_profile: str = "default") -> None:
         """
         通过粘贴方式输出文本
@@ -128,6 +147,7 @@ class TextOutput:
             text: 要粘贴的文本
         """
         pre_delay_ms, restore_delay_ms = self._paste_timing(paste_profile)
+        profile_params = self._paste_profile_params(paste_profile)
         logger.debug(
             "使用粘贴方式输出文本，长度=%s, profile=%s",
             len(text),
@@ -141,6 +161,11 @@ class TextOutput:
             safe_restore_only_if_unchanged=bool(Config.restore_clip_safeguard),
             restore_retry_count=3,
             restore_retry_interval_ms=80,
+            copy_pulse_count=profile_params["copy_pulse_count"],
+            copy_pulse_interval_ms=profile_params["copy_pulse_interval_ms"],
+            restore_baseline_window_ms=profile_params["restore_baseline_window_ms"],
+            restore_guard_window_ms=profile_params["restore_guard_window_ms"],
+            restore_guard_interval_ms=profile_params["restore_guard_interval_ms"],
         )
     
     def _type_text(self, text: str) -> None:
