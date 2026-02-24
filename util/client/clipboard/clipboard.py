@@ -9,7 +9,9 @@
 4. 粘贴文本（模拟 Ctrl+V）
 """
 import asyncio
+import hashlib
 import platform
+import time
 from contextlib import contextmanager
 import pyclip
 from pynput import keyboard
@@ -18,6 +20,7 @@ from . import logger
 
 # 支持的编码列表
 CLIPBOARD_ENCODINGS = ['utf-8', 'gbk', 'utf-16', 'latin1']
+_PASTE_LOCK = asyncio.Lock()
 
 
 def safe_paste() -> str:
@@ -31,6 +34,12 @@ def safe_paste() -> str:
     """
     try:
         clipboard_data = pyclip.paste()
+
+        if clipboard_data is None:
+            return ""
+
+        if isinstance(clipboard_data, str):
+            return clipboard_data
 
         # 尝试多种编码方式
         for encoding in CLIPBOARD_ENCODINGS:
@@ -91,50 +100,99 @@ def save_and_restore_clipboard():
             pyclip.copy("临时内容")
         # 退出后剪贴板恢复原内容
     """
-    original = safe_paste()
+    original = ""
+    has_original = False
+    try:
+        original = safe_paste()
+        has_original = True
+    except Exception:
+        pass
     try:
         yield
     finally:
-        if original:
+        if has_original:
             pyclip.copy(original)
             logger.debug("剪贴板已恢复")
 
 
-async def paste_text(text: str, restore_clipboard: bool = True):
+def _text_fingerprint(text: str) -> str:
+    value = text or ""
+    return hashlib.sha1(value.encode("utf-8", errors="ignore")).hexdigest()[:8]
+
+
+async def paste_text(
+    text: str,
+    restore_clipboard: bool = True,
+    *,
+    pre_delay_ms: int = 0,
+    restore_delay_ms: int = 100,
+    safe_restore_only_if_unchanged: bool = True,
+):
     """
     通过模拟 Ctrl+V 粘贴文本
 
     Args:
         text: 要粘贴的文本
         restore_clipboard: 粘贴后是否恢复原剪贴板内容
+        pre_delay_ms: 复制到剪贴板后，发送 Ctrl/Cmd+V 前的等待时间
+        restore_delay_ms: 发送粘贴后，恢复剪贴板前的等待时间
+        safe_restore_only_if_unchanged: 仅当剪贴板仍是本次注入文本时才恢复
     """
-    # 保存剪切板
-    original = ''
-    if restore_clipboard:
-        try:
-            original = safe_paste()
-        except:
-            pass
+    if not text:
+        return
 
-    # 复制要粘贴的文本
-    pyclip.copy(text)
-    logger.debug(f"已复制文本到剪贴板，长度: {len(text)}")
+    injected_text = str(text)
+    op_id = f"paste-{int(time.time() * 1000)}"
+    fp = _text_fingerprint(injected_text)
 
-    # 粘贴结果（使用 pynput 模拟 Ctrl+V）
-    controller = keyboard.Controller()
-    if platform.system() == 'Darwin':
-        # macOS: Command+V
-        with controller.pressed(keyboard.Key.cmd):
-            controller.tap('v')
-    else:
-        # Windows/Linux: Ctrl+V
-        with controller.pressed(keyboard.Key.ctrl):
-            controller.tap('v')
-    
-    logger.debug("已发送粘贴命令 (Ctrl+V)")
+    async with _PASTE_LOCK:
+        # 保存原剪贴板
+        original = ""
+        has_original = False
+        if restore_clipboard:
+            try:
+                original = safe_paste()
+                has_original = True
+            except Exception:
+                has_original = False
 
-    # 还原剪贴板
-    if restore_clipboard and original:
-        await asyncio.sleep(0.1)
-        pyclip.copy(original)
-        logger.debug("剪贴板已恢复")
+        # 复制要粘贴的文本
+        pyclip.copy(injected_text)
+        logger.debug(
+            "paste[%s] copied, len=%s, fp=%s, pre_delay_ms=%s restore_delay_ms=%s",
+            op_id,
+            len(injected_text),
+            fp,
+            pre_delay_ms,
+            restore_delay_ms,
+        )
+
+        if pre_delay_ms > 0:
+            await asyncio.sleep(max(0.0, pre_delay_ms / 1000.0))
+
+        # 粘贴结果（使用 pynput 模拟 Ctrl+V）
+        controller = keyboard.Controller()
+        if platform.system() == 'Darwin':
+            # macOS: Command+V
+            with controller.pressed(keyboard.Key.cmd):
+                controller.tap('v')
+        else:
+            # Windows/Linux: Ctrl+V
+            with controller.pressed(keyboard.Key.ctrl):
+                controller.tap('v')
+
+        logger.debug("paste[%s] sent hotkey", op_id)
+
+        # 还原剪贴板
+        if restore_clipboard and has_original:
+            if restore_delay_ms > 0:
+                await asyncio.sleep(max(0.0, restore_delay_ms / 1000.0))
+
+            if safe_restore_only_if_unchanged:
+                current = safe_paste()
+                if current != injected_text:
+                    logger.debug("paste[%s] skip restore: clipboard changed externally", op_id)
+                    return
+
+            pyclip.copy(original)
+            logger.debug("paste[%s] restored clipboard", op_id)

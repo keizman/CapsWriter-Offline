@@ -159,8 +159,16 @@ class ResultProcessor:
         window_info = get_active_window_info()
         should_force_paste, matched_keyword = _should_force_paste(window_info)
         if should_force_paste:
+            if streaming:
+                # 远控链路下，录音过程中频繁粘贴会放大剪贴板同步延迟问题。
+                # 录音中先不提交，等 final 阶段再一次性快速上屏。
+                logger.debug(
+                    "partial 模式命中兼容窗口关键词: %s，录音中延后到 final 上屏",
+                    matched_keyword,
+                )
+                return
             logger.debug("partial 模式命中兼容窗口关键词: %s，改为粘贴输出", matched_keyword)
-            await self._text_output.output(delta, paste=True)
+            await self._text_output.output(delta, paste=True, paste_profile="remote")
             state.committed_text += delta
             get_state().set_output_text(state.committed_text)
             return
@@ -176,7 +184,7 @@ class ResultProcessor:
             paste = Config.paste
             if should_force_paste:
                 paste = True
-            await self._text_output.output(delta, paste=paste)
+            await self._text_output.output(delta, paste=paste, paste_profile="default")
 
         state.committed_text += delta
         get_state().set_output_text(state.committed_text)
@@ -208,6 +216,13 @@ class ResultProcessor:
             return
 
         # final：先提交上一 block 的稳定前缀，再提交 final 剩余文本
+        force_paste_now, _ = _should_force_paste(get_active_window_info())
+        if force_paste_now:
+            # 远控窗口在 final 直接一次性提交，避免多次 paste 带来的链路延迟抖动。
+            await self._commit_partial_increment(state, current_text, streaming=False)
+            self._partial_states.pop(task_id, None)
+            return
+
         if state.prev_partial:
             stable_len = self._lcp_len(state.prev_partial, current_text)
             stable_text = current_text[:stable_len]
@@ -459,8 +474,10 @@ class ResultProcessor:
             logger.debug("前台窗口检测为空，沿用默认输出模式")
 
         should_force_paste, matched_keyword = _should_force_paste(window_info)
+        paste_profile = "default"
         if should_force_paste:
             paste = True
+            paste_profile = "remote"
             logger.debug(f"检测到兼容性应用关键词: {matched_keyword}，使用粘贴模式")
         logger.debug("本次输出模式: %s", "paste" if paste else "type")
 
@@ -480,7 +497,7 @@ class ResultProcessor:
                 matched_hotwords=potential_hotwords  # 传递上下文热词给 LLM
             )
         else:
-            await self._text_output.output(text, paste=paste)
+            await self._text_output.output(text, paste=paste, paste_profile=paste_profile)
             get_state().set_output_text(text)
 
         # 保存录音与写入 md 文件

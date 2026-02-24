@@ -297,6 +297,31 @@ class ClientConfig:
             "audio", "device_poll_interval_secs",
             default=cls.audio_device_poll_interval_secs
         )
+        cls.paste_pre_delay_ms = _cfg_int(
+            "CAPSWRITER_PASTE_PRE_DELAY_MS",
+            "output", "paste_pre_delay_ms",
+            default=cls.paste_pre_delay_ms
+        )
+        cls.paste_restore_delay_ms = _cfg_int(
+            "CAPSWRITER_PASTE_RESTORE_DELAY_MS",
+            "output", "paste_restore_delay_ms",
+            default=cls.paste_restore_delay_ms
+        )
+        cls.paste_remote_pre_delay_ms = _cfg_int(
+            "CAPSWRITER_PASTE_REMOTE_PRE_DELAY_MS",
+            "output", "paste_remote_pre_delay_ms",
+            default=cls.paste_remote_pre_delay_ms
+        )
+        cls.paste_remote_restore_delay_ms = _cfg_int(
+            "CAPSWRITER_PASTE_REMOTE_RESTORE_DELAY_MS",
+            "output", "paste_remote_restore_delay_ms",
+            default=cls.paste_remote_restore_delay_ms
+        )
+        cls.restore_clip_safeguard = _cfg_bool(
+            "CAPSWRITER_RESTORE_CLIP_SAFEGUARD",
+            "output", "restore_clip_safeguard",
+            default=cls.restore_clip_safeguard
+        )
 
     # 快捷键配置列表
     shortcuts = (
@@ -408,6 +433,34 @@ class ClientConfig:
         "CAPSWRITER_AUDIO_DEVICE_POLL_INTERVAL_SECS",
         "audio", "device_poll_interval_secs",
         default=1.5
+    )
+
+    # 粘贴模式时序参数（多级远控链路建议增大，减少“粘贴上一拍内容”）
+    paste_pre_delay_ms = _cfg_int(
+        "CAPSWRITER_PASTE_PRE_DELAY_MS",
+        "output", "paste_pre_delay_ms",
+        default=20
+    )
+    paste_restore_delay_ms = _cfg_int(
+        "CAPSWRITER_PASTE_RESTORE_DELAY_MS",
+        "output", "paste_restore_delay_ms",
+        default=180
+    )
+    paste_remote_pre_delay_ms = _cfg_int(
+        "CAPSWRITER_PASTE_REMOTE_PRE_DELAY_MS",
+        "output", "paste_remote_pre_delay_ms",
+        default=220
+    )
+    paste_remote_restore_delay_ms = _cfg_int(
+        "CAPSWRITER_PASTE_REMOTE_RESTORE_DELAY_MS",
+        "output", "paste_remote_restore_delay_ms",
+        default=420
+    )
+    # 安全恢复：仅当剪贴板仍为本次注入文本时才恢复原值，避免覆盖用户新复制内容
+    restore_clip_safeguard = _cfg_bool(
+        "CAPSWRITER_RESTORE_CLIP_SAFEGUARD",
+        "output", "restore_clip_safeguard",
+        default=True
     )
 
     paste        = not _IS_WINDOWS  # 非 Windows 默认使用粘贴，兼容性更好

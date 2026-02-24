@@ -12,10 +12,10 @@ import platform
 from typing import Optional
 import re
 
-import pyclip
 from pynput import keyboard as pynput_keyboard
 
 from config_client import ClientConfig as Config
+from util.client.clipboard import paste_text
 from . import logger
 
 if platform.system() == 'Windows':
@@ -48,7 +48,12 @@ class TextOutput:
         clean_text = re.sub(f"(?<=.)[{Config.trash_punc}]$", "", text)
         return clean_text
     
-    async def output(self, text: str, paste: Optional[bool] = None) -> None:
+    async def output(
+        self,
+        text: str,
+        paste: Optional[bool] = None,
+        paste_profile: str = "default",
+    ) -> None:
         """
         输出识别结果
         
@@ -66,7 +71,7 @@ class TextOutput:
             paste = Config.paste
         
         if paste:
-            await self._paste_text(text)
+            await self._paste_text(text, paste_profile=paste_profile)
         else:
             self._type_text(text)
 
@@ -75,6 +80,7 @@ class TextOutput:
         text: str,
         paste: Optional[bool] = None,
         char_interval_ms: int = 0,
+        paste_profile: str = "default",
     ) -> None:
         """
         逐字流式输出文本（仅在 partial 输入模式下使用）。
@@ -92,7 +98,7 @@ class TextOutput:
 
         if paste:
             # 粘贴模式无法提供逐字感知，回退为一次性输出。
-            await self._paste_text(text)
+            await self._paste_text(text, paste_profile=paste_profile)
             return
 
         delay = max(0.0, float(char_interval_ms) / 1000.0)
@@ -101,42 +107,39 @@ class TextOutput:
             if delay > 0:
                 await asyncio.sleep(delay)
     
-    async def _paste_text(self, text: str) -> None:
+    @staticmethod
+    def _paste_timing(paste_profile: str) -> tuple[int, int]:
+        profile = (paste_profile or "default").strip().lower()
+        if profile == "remote":
+            return (
+                int(Config.paste_remote_pre_delay_ms),
+                int(Config.paste_remote_restore_delay_ms),
+            )
+        return (
+            int(Config.paste_pre_delay_ms),
+            int(Config.paste_restore_delay_ms),
+        )
+
+    async def _paste_text(self, text: str, paste_profile: str = "default") -> None:
         """
         通过粘贴方式输出文本
         
         Args:
             text: 要粘贴的文本
         """
-        logger.debug(f"使用粘贴方式输出文本，长度: {len(text)}")
-        
-        # 保存剪贴板
-        try:
-            temp = pyclip.paste().decode('utf-8')
-        except Exception:
-            temp = ''
-        
-        # 复制结果
-        pyclip.copy(text)
-        
-        # 粘贴结果（使用 pynput 模拟 Ctrl+V）
-        controller = pynput_keyboard.Controller()
-        if platform.system() == 'Darwin':
-            # macOS: Command+V
-            with controller.pressed(pynput_keyboard.Key.cmd):
-                controller.tap('v')
-        else:
-            # Windows/Linux: Ctrl+V
-            with controller.pressed(pynput_keyboard.Key.ctrl):
-                controller.tap('v')
-        
-        logger.debug("已发送粘贴命令 (Ctrl+V)")
-        
-        # 还原剪贴板
-        if Config.restore_clip:
-            await asyncio.sleep(0.1)
-            pyclip.copy(temp)
-            logger.debug("剪贴板已恢复")
+        pre_delay_ms, restore_delay_ms = self._paste_timing(paste_profile)
+        logger.debug(
+            "使用粘贴方式输出文本，长度=%s, profile=%s",
+            len(text),
+            paste_profile,
+        )
+        await paste_text(
+            text,
+            restore_clipboard=Config.restore_clip,
+            pre_delay_ms=pre_delay_ms,
+            restore_delay_ms=restore_delay_ms,
+            safe_restore_only_if_unchanged=bool(Config.restore_clip_safeguard),
+        )
     
     def _type_text(self, text: str) -> None:
         """

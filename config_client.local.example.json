@@ -15,7 +15,12 @@
     "partial_input_enabled": false,
     "partial_input_char_interval_ms": 10,
     "partial_input_seg_duration": 6,
-    "partial_input_seg_overlap": 1
+    "partial_input_seg_overlap": 1,
+    "paste_pre_delay_ms": 20,
+    "paste_restore_delay_ms": 180,
+    "paste_remote_pre_delay_ms": 220,
+    "paste_remote_restore_delay_ms": 420,
+    "restore_clip_safeguard": true
   },
   "audio": {
     "device_auto_refresh": true,
