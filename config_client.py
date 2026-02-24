@@ -454,7 +454,7 @@ class ClientConfig:
     paste_remote_restore_delay_ms = _cfg_int(
         "CAPSWRITER_PASTE_REMOTE_RESTORE_DELAY_MS",
         "output", "paste_remote_restore_delay_ms",
-        default=800
+        default=2000
     )
     # 安全恢复：仅当剪贴板仍为本次注入文本时才恢复原值，避免覆盖用户新复制内容
     restore_clip_safeguard = _cfg_bool(

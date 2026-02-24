@@ -127,15 +127,11 @@ class TextOutput:
             return {
                 "copy_pulse_count": 3,
                 "copy_pulse_interval_ms": 120,
-                "restore_guard_window_ms": 2800,
-                "restore_guard_interval_ms": 250,
                 "restore_baseline_window_ms": 18000,
             }
         return {
             "copy_pulse_count": 1,
             "copy_pulse_interval_ms": 120,
-            "restore_guard_window_ms": 0,
-            "restore_guard_interval_ms": 250,
             "restore_baseline_window_ms": 12000,
         }
 
@@ -164,8 +160,6 @@ class TextOutput:
             copy_pulse_count=profile_params["copy_pulse_count"],
             copy_pulse_interval_ms=profile_params["copy_pulse_interval_ms"],
             restore_baseline_window_ms=profile_params["restore_baseline_window_ms"],
-            restore_guard_window_ms=profile_params["restore_guard_window_ms"],
-            restore_guard_interval_ms=profile_params["restore_guard_interval_ms"],
         )
     
     def _type_text(self, text: str) -> None:

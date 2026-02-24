@@ -19,7 +19,7 @@
     "paste_pre_delay_ms": 20,
     "paste_restore_delay_ms": 180,
     "paste_remote_pre_delay_ms": 550,
-    "paste_remote_restore_delay_ms": 800,
+    "paste_remote_restore_delay_ms": 2000,
     "restore_clip_safeguard": false
   },
   "audio": {

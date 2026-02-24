@@ -14,6 +14,7 @@ import platform
 import time
 from collections import deque
 from contextlib import contextmanager
+from typing import Optional
 import pyclip
 from pynput import keyboard
 from . import logger
@@ -26,6 +27,12 @@ _BASELINE_CLIPBOARD = ""
 _HAS_BASELINE = False
 _LAST_PASTE_MONO = 0.0
 _RECENT_INJECTED = deque(maxlen=8)
+_RESTORE_TASK: Optional[asyncio.Task] = None
+_RESTORE_TOKEN = 0
+
+
+def _normalize_clip_text(value: str) -> str:
+    return str(value or "").rstrip('\x00')
 
 
 def safe_paste() -> str:
@@ -72,12 +79,13 @@ def safe_copy(content: str) -> bool:
     Returns:
         是否成功
     """
-    if not content:
+    if content is None:
         return False
 
     try:
-        pyclip.copy(content)
-        logger.debug(f"剪贴板写入成功，长度: {len(content)}")
+        text = str(content)
+        pyclip.copy(text)
+        logger.debug(f"剪贴板写入成功，长度: {len(text)}")
         return True
     except Exception as e:
         logger.warning(f"剪贴板写入失败: {e}")
@@ -116,8 +124,11 @@ def save_and_restore_clipboard():
         yield
     finally:
         if has_original:
-            pyclip.copy(original)
-            logger.debug("剪贴板已恢复")
+            try:
+                pyclip.copy(original)
+                logger.debug("剪贴板已恢复")
+            except Exception as e:
+                logger.warning(f"剪贴板恢复失败: {e}")
 
 
 def _text_fingerprint(text: str) -> str:
@@ -137,8 +148,6 @@ async def paste_text(
     copy_pulse_count: int = 1,
     copy_pulse_interval_ms: int = 120,
     restore_baseline_window_ms: int = 12000,
-    restore_guard_window_ms: int = 0,
-    restore_guard_interval_ms: int = 250,
 ):
     """
     通过模拟 Ctrl+V 粘贴文本
@@ -154,8 +163,6 @@ async def paste_text(
         copy_pulse_count: 粘贴前重复写入剪贴板次数（远控链路可提高）
         copy_pulse_interval_ms: 重复写入间隔
         restore_baseline_window_ms: 连续粘贴窗口内复用首次原剪贴板
-        restore_guard_window_ms: 恢复后守护窗口，处理远控回流覆盖
-        restore_guard_interval_ms: 守护检查间隔
     """
     if not text:
         return
@@ -164,8 +171,62 @@ async def paste_text(
     op_id = f"paste-{int(time.time() * 1000)}"
     fp = _text_fingerprint(injected_text)
 
+    async def _run_deferred_restore(
+        token: int,
+        original_value: str,
+        expected_fp: str,
+    ) -> None:
+        global _RESTORE_TOKEN, _HAS_BASELINE, _RESTORE_TASK
+        try:
+            if restore_delay_ms > 0:
+                await asyncio.sleep(max(0.0, restore_delay_ms / 1000.0))
+
+            async with _PASTE_LOCK:
+                if token != _RESTORE_TOKEN:
+                    return
+
+                if safe_restore_only_if_unchanged:
+                    current = _normalize_clip_text(safe_paste())
+                    if _text_fingerprint(current) != expected_fp:
+                        logger.debug("paste[%s] skip restore: clipboard changed externally", token)
+                        _HAS_BASELINE = False
+                        _RECENT_INJECTED.clear()
+                        return
+
+                def _restore_once() -> bool:
+                    try:
+                        pyclip.copy(original_value)
+                        return _normalize_clip_text(safe_paste()) == _normalize_clip_text(original_value)
+                    except Exception:
+                        return False
+
+                restored = _restore_once()
+                if not restored:
+                    retries = max(0, int(restore_retry_count))
+                    interval_sec = max(0.0, float(restore_retry_interval_ms) / 1000.0)
+                    for _ in range(retries):
+                        if interval_sec > 0:
+                            await asyncio.sleep(interval_sec)
+                        if _restore_once():
+                            restored = True
+                            break
+
+                if restored:
+                    logger.debug("paste[%s] restored clipboard", token)
+                else:
+                    logger.warning("paste[%s] restore clipboard failed after retries", token)
+
+                # 一次粘贴会话结束，清理 baseline 状态，避免污染下一轮。
+                _HAS_BASELINE = False
+                _RECENT_INJECTED.clear()
+        except asyncio.CancelledError:
+            return
+        finally:
+            if token == _RESTORE_TOKEN:
+                _RESTORE_TASK = None
+
     async with _PASTE_LOCK:
-        global _BASELINE_CLIPBOARD, _HAS_BASELINE, _LAST_PASTE_MONO
+        global _BASELINE_CLIPBOARD, _HAS_BASELINE, _LAST_PASTE_MONO, _RESTORE_TASK, _RESTORE_TOKEN
 
         # 保存原剪贴板
         original = ""
@@ -230,54 +291,12 @@ async def paste_text(
 
         # 还原剪贴板
         if restore_clipboard and has_original:
-            if restore_delay_ms > 0:
-                await asyncio.sleep(max(0.0, restore_delay_ms / 1000.0))
-
-            if safe_restore_only_if_unchanged:
-                current = safe_paste()
-                if current != injected_text:
-                    logger.debug("paste[%s] skip restore: clipboard changed externally", op_id)
-                    return
-
-            def _restore_once() -> bool:
-                try:
-                    pyclip.copy(original)
-                    return safe_paste() == original
-                except Exception:
-                    return False
-
-            restored = _restore_once()
-            if not restored:
-                retries = max(0, int(restore_retry_count))
-                interval_sec = max(0.0, float(restore_retry_interval_ms) / 1000.0)
-                for _ in range(retries):
-                    if interval_sec > 0:
-                        await asyncio.sleep(interval_sec)
-                    if _restore_once():
-                        restored = True
-                        break
-
-            if restored:
-                logger.debug("paste[%s] restored clipboard", op_id)
-            else:
-                logger.warning("paste[%s] restore clipboard failed after retries", op_id)
-
-            guard_window_sec = max(0.0, float(restore_guard_window_ms) / 1000.0)
-            guard_interval_sec = max(0.05, float(restore_guard_interval_ms) / 1000.0)
-            if guard_window_sec > 0:
-                guard_deadline = time.monotonic() + guard_window_sec
-                while time.monotonic() < guard_deadline:
-                    await asyncio.sleep(guard_interval_sec)
-                    now_clip = safe_paste()
-                    if now_clip == original:
-                        continue
-                    if now_clip == injected_text or now_clip in _RECENT_INJECTED:
-                        pyclip.copy(original)
-                        logger.debug("paste[%s] guard restored clipboard", op_id)
-                        continue
-                    # 出现其他内容，认为是用户主动操作，停止守护，避免覆盖用户行为。
-                    logger.debug("paste[%s] guard stopped by external clipboard change", op_id)
-                    break
+            # 连续粘贴时重置恢复计时器；仅最后一次粘贴后执行恢复，避免远控链路被提前恢复打断。
+            if _RESTORE_TASK and not _RESTORE_TASK.done():
+                _RESTORE_TASK.cancel()
+            _RESTORE_TOKEN += 1
+            token = _RESTORE_TOKEN
+            _RESTORE_TASK = asyncio.create_task(_run_deferred_restore(token, original, fp))
 
         _LAST_PASTE_MONO = time.monotonic()
         _RECENT_INJECTED.append(injected_text)

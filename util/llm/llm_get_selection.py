@@ -10,10 +10,9 @@ LLM 获取选中文字功能
 """
 import time
 import platform
-import pyclip
 from pynput import keyboard as pynput_keyboard
 from . import logger
-from .llm_clipboard import safe_paste
+from .llm_clipboard import safe_paste, safe_copy
 from util.client.state import get_state
 state = get_state()
 
@@ -65,7 +64,7 @@ def get_selected_text(role_config) -> str:
         selected_text = safe_paste()
 
         # 还原原来的剪贴板内容
-        pyclip.copy(original_clipboard)
+        safe_copy(original_clipboard)
 
         # 如果内容没有变化，说明没有选中文字，返回空字符串
         if selected_text == original_clipboard or selected_text == state.last_output_text:
