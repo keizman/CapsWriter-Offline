@@ -56,6 +56,7 @@ def _should_force_paste(window_info: dict) -> tuple[bool, Optional[str]]:
         "wechat",
         "微信",
         "rustdesk",
+        "scrcpy",
     )
     fields = (
         str(window_info.get("title", "")).lower(),
@@ -150,6 +151,16 @@ class ResultProcessor:
         if not delta:
             return
 
+        # 远控窗口（如 RustDesk / scrcpy）优先走粘贴，避免中文字符注入失败。
+        window_info = get_active_window_info()
+        should_force_paste, matched_keyword = _should_force_paste(window_info)
+        if should_force_paste:
+            logger.debug("partial 模式命中兼容窗口关键词: %s，改为粘贴输出", matched_keyword)
+            await self._text_output.output(delta, paste=True)
+            state.committed_text += delta
+            get_state().set_output_text(state.committed_text)
+            return
+
         if streaming:
             await self._text_output.output_streaming(
                 delta,
@@ -159,8 +170,6 @@ class ResultProcessor:
         else:
             # 松键后（或非录音态）剩余内容走原始快速上屏，避免逐字等待。
             paste = Config.paste
-            window_info = get_active_window_info()
-            should_force_paste, _ = _should_force_paste(window_info)
             if should_force_paste:
                 paste = True
             await self._text_output.output(delta, paste=paste)
