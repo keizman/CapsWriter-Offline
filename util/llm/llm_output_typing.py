@@ -11,8 +11,8 @@ from pynput import keyboard as pynput_keyboard
 
 from config_client import ClientConfig as Config
 from util.tools.asyncio_to_thread import to_thread
+from util.tools.window_detector import get_active_window_info
 from util.client.output.text_output import TextOutput
-from util.client.clipboard import paste_text
 from util.llm.llm_stop_monitor import reset, should_stop
 from . import logger
 
@@ -23,6 +23,44 @@ else:
 
 
 _PYNPUT_CONTROLLER = pynput_keyboard.Controller()
+_TEXT_OUTPUT = TextOutput()
+
+
+def _is_remote_compat_window() -> bool:
+    """
+    检测当前窗口是否为远控/兼容场景，需使用 remote 粘贴时序。
+    """
+    info = get_active_window_info()
+    if not info:
+        return False
+
+    compatibility_keywords = (
+        "weixin",
+        "wechat",
+        "微信",
+        "rustdesk",
+        "scrcpy",
+        "mstsc",
+        "remote desktop",
+        "rdp",
+        "远程桌面",
+    )
+    fields = (
+        str(info.get("title", "")).lower(),
+        str(info.get("class_name", "")).lower(),
+        str(info.get("process_name", "")).lower(),
+        str(info.get("app_name", "")).lower(),
+    )
+    for keyword in compatibility_keywords:
+        token = keyword.lower()
+        if any(token and token in field for field in fields):
+            return True
+    return False
+
+
+async def _paste_via_text_output(text: str) -> None:
+    profile = "remote" if _is_remote_compat_window() else "default"
+    await _TEXT_OUTPUT.output(text, paste=True, paste_profile=profile)
 
 
 def _write_text(text: str) -> None:
@@ -75,7 +113,7 @@ async def _process_paste(handler, role_config, content, matched_hotwords) -> tup
         return ("", 0, 0.0)
 
     final_text = TextOutput.strip_punc(polished_text or content)
-    await paste_text(final_text, restore_clipboard=Config.restore_clip)
+    await _paste_via_text_output(final_text)
     return (final_text, token_count, gen_time)
 
 
@@ -140,8 +178,11 @@ async def _process_streaming(handler, role_config, content, matched_hotwords) ->
 
 async def output_text(text: str, paste: bool = None):
     """输出文本（根据 paste 或 Config.paste 选择方式）"""
+    if paste is None:
+        paste = Config.paste
+
     if paste:
-        await paste_text(text, restore_clipboard=Config.restore_clip)
+        await _paste_via_text_output(text)
     else:
         logger.debug(f"output_text: keyboard.write '{text}'")
         _write_text(text)
