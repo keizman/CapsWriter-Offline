@@ -57,6 +57,10 @@ def _should_force_paste(window_info: dict) -> tuple[bool, Optional[str]]:
         "微信",
         "rustdesk",
         "scrcpy",
+        "mstsc",
+        "remote desktop",
+        "rdp",
+        "远程桌面",
     )
     fields = (
         str(window_info.get("title", "")).lower(),

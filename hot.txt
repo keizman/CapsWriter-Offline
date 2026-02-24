@@ -24,3 +24,4 @@ conda
 9
 0
 10
+skills
