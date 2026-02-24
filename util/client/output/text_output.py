@@ -139,6 +139,8 @@ class TextOutput:
             pre_delay_ms=pre_delay_ms,
             restore_delay_ms=restore_delay_ms,
             safe_restore_only_if_unchanged=bool(Config.restore_clip_safeguard),
+            restore_retry_count=3,
+            restore_retry_interval_ms=80,
         )
     
     def _type_text(self, text: str) -> None:

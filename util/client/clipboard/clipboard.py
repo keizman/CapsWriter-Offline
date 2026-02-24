@@ -126,7 +126,9 @@ async def paste_text(
     *,
     pre_delay_ms: int = 0,
     restore_delay_ms: int = 100,
-    safe_restore_only_if_unchanged: bool = True,
+    safe_restore_only_if_unchanged: bool = False,
+    restore_retry_count: int = 2,
+    restore_retry_interval_ms: int = 80,
 ):
     """
     通过模拟 Ctrl+V 粘贴文本
@@ -137,6 +139,8 @@ async def paste_text(
         pre_delay_ms: 复制到剪贴板后，发送 Ctrl/Cmd+V 前的等待时间
         restore_delay_ms: 发送粘贴后，恢复剪贴板前的等待时间
         safe_restore_only_if_unchanged: 仅当剪贴板仍是本次注入文本时才恢复
+        restore_retry_count: 恢复失败时的补偿重试次数
+        restore_retry_interval_ms: 恢复重试间隔
     """
     if not text:
         return
@@ -194,5 +198,25 @@ async def paste_text(
                     logger.debug("paste[%s] skip restore: clipboard changed externally", op_id)
                     return
 
-            pyclip.copy(original)
-            logger.debug("paste[%s] restored clipboard", op_id)
+            def _restore_once() -> bool:
+                try:
+                    pyclip.copy(original)
+                    return safe_paste() == original
+                except Exception:
+                    return False
+
+            restored = _restore_once()
+            if not restored:
+                retries = max(0, int(restore_retry_count))
+                interval_sec = max(0.0, float(restore_retry_interval_ms) / 1000.0)
+                for _ in range(retries):
+                    if interval_sec > 0:
+                        await asyncio.sleep(interval_sec)
+                    if _restore_once():
+                        restored = True
+                        break
+
+            if restored:
+                logger.debug("paste[%s] restored clipboard", op_id)
+            else:
+                logger.warning("paste[%s] restore clipboard failed after retries", op_id)
